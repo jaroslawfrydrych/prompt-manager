@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="build/icon.png" width="160" alt="Prompt Manager icon">
+  <img src="assets/icon.png" width="160" alt="Prompt Manager icon">
 </p>
 
 <h1 align="center">Prompt Manager</h1>

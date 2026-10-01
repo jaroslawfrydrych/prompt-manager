@@ -133,7 +133,7 @@ app.on('second-instance', () => {
 
 app.whenReady().then(() => {
   nativeTheme.themeSource = 'system';
-  if (!app.isPackaged && app.dock) app.dock.setIcon(path.join(__dirname, 'build/icon.png'));
+  if (!app.isPackaged && app.dock) app.dock.setIcon(path.join(__dirname, 'assets/icon.png'));
   const send = (cmd) => () => win && win.webContents.send('command', cmd);
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     {
