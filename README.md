@@ -30,10 +30,6 @@ Prompt Manager is the place where those prompts wait their turn.
 - **Light & dark.** Follows the system appearance.
 - **Local only.** Everything is stored in one JSON file on your Mac. The app makes no network requests.
 
-<p align="center">
-  <img src="docs/screenshot-light.png" width="820" alt="Prompt Manager in light mode">
-</p>
-
 ## Install
 
 Download the latest `Prompt-Manager-<version>-arm64.dmg` from
