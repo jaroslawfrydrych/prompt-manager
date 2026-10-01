@@ -1,0 +1,30 @@
+{
+  "name": "prompt-manager",
+  "productName": "Prompt Manager",
+  "version": "1.0.0",
+  "description": "A macOS app for queueing the prompts you write while your AI coding agent is busy.",
+  "author": {
+    "name": "Jarosław Frydrych",
+    "url": "https://github.com/jaroslawfrydrych"
+  },
+  "homepage": "https://github.com/jaroslawfrydrych/prompt-manager",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jaroslawfrydrych/prompt-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jaroslawfrydrych/prompt-manager/issues"
+  },
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "smoke": "electron scripts/smoke.js",
+    "dist": "electron-packager . \"Prompt Manager\" --platform=darwin --out=dist --overwrite --icon=build/icon.icns --app-bundle-id=com.jaroslawfrydrych.promptmanager --app-copyright=\"© 2026 Jarosław Frydrych\" --app-category-type=public.app-category.developer-tools --ignore=^/dist --ignore=^/scripts --ignore=^/docs --ignore=^/\\.github --ignore=^/\\.idea",
+    "dmg": "npm run dist && sh scripts/dmg.sh"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^44.5.1"
+  }
+}
