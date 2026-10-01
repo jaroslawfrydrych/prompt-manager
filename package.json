@@ -7,6 +7,7 @@
     "name": "Jarosław Frydrych",
     "url": "https://github.com/jaroslawfrydrych"
   },
+  "license": "MIT",
   "homepage": "https://github.com/jaroslawfrydrych/prompt-manager",
   "repository": {
     "type": "git",
@@ -20,7 +21,7 @@
   "scripts": {
     "start": "electron .",
     "smoke": "electron scripts/smoke.js",
-    "dist": "electron-packager . \"Prompt Manager\" --platform=darwin --out=dist --overwrite --icon=build/icon.icns --app-bundle-id=com.jaroslawfrydrych.promptmanager --app-copyright=\"© 2026 Jarosław Frydrych\" --app-category-type=public.app-category.developer-tools --ignore=^/dist --ignore=^/scripts --ignore=^/docs --ignore=^/\\.github --ignore=^/\\.idea",
+    "dist": "electron-packager . \"Prompt Manager\" --platform=darwin --out=dist --overwrite --icon=build/icon.icns --app-bundle-id=com.jaroslawfrydrych.promptmanager --app-copyright=\"© 2026 Jarosław Frydrych\" --app-category-type=public.app-category.developer-tools --ignore=^/dist --ignore=^/scripts --ignore=^/docs --ignore=^/\\.github --ignore=^/\\.idea --ignore=^/\\.gitignore --ignore=^/README\\.md --ignore=^/build/icon\\.icns",
     "dmg": "npm run dist && sh scripts/dmg.sh"
   },
   "devDependencies": {
