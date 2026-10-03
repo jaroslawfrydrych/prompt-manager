@@ -9,24 +9,35 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/jaroslawfrydrych/prompt-manager/releases/latest"><img src="https://img.shields.io/github/v/release/jaroslawfrydrych/prompt-manager" alt="Latest release"></a>
+  <a href="https://github.com/jaroslawfrydrych/prompt-manager/actions/workflows/build.yml"><img src="https://github.com/jaroslawfrydrych/prompt-manager/actions/workflows/build.yml/badge.svg" alt="Build"></a>
+  <a href="https://github.com/jaroslawfrydrych/prompt-manager/releases"><img src="https://img.shields.io/github/downloads/jaroslawfrydrych/prompt-manager/total" alt="Downloads"></a>
+  <img src="https://img.shields.io/badge/macOS-Apple%20Silicon-000000?logo=apple" alt="macOS, Apple Silicon">
+  <img src="https://img.shields.io/github/package-json/dependency-version/jaroslawfrydrych/prompt-manager/dev/electron?logo=electron" alt="Electron">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/jaroslawfrydrych/prompt-manager" alt="MIT license"></a>
+</p>
+
+<p align="center">
   <img src="docs/screenshot-dark.png" width="820" alt="Prompt Manager in dark mode">
 </p>
 
 ## What it is
 
-When you build with AI coding agents (Claude Code, OpenCode, Codex…) and spec-driven workflows, the next prompt is usually written
+When you work with AI coding agents (Claude Code, OpenCode, Codex…) or spec-driven workflows, you usually write the next prompt
 while the agent is still busy with the current one: a piece of feedback, the next feature, a fix you just noticed.
-Prompt Manager is the place where those prompts wait their turn.
+Prompt Manager is where those prompts wait their turn.
 
-- **One queue per project.** A Mail-style sidebar with projects and a pending count on each.
-  The **All** and **Flagged** views show everything at once.
-- **Prompts are text blocks.** Click to edit, `⌘↩` to save. Fenced ```` ``` ```` code blocks and `` `inline code` `` are rendered.
-- **Copy, paste, done.** One click copies the whole prompt for your harness, and `⌥`-click also marks it as done.
+- **One queue per project.** A Mail-style sidebar lists your projects, each with its pending count.
+  **All** shows prompts from every project, **Flagged** only the flagged ones.
+- **Prompts are plain text.** Click a prompt to edit it, `⌘↩` to save. Fenced ```` ``` ```` code blocks and `` `inline code` `` are rendered,
+  and every code block has its own copy button.
+- **Copy, paste, done.** One click copies the whole prompt, ready to paste into your agent. `⌥`-click also marks it as done.
   Done prompts move to a **Done** tab, where you can restore them.
-- **See what's getting old.** Every prompt shows when it was written. Anything older than 3 days gets an orange badge, because it may be outdated.
-- **Finder-style flags.** Right-click a prompt to give it a red, orange, yellow, green, blue, purple or gray flag.
+- **See what's getting old.** Every prompt shows when it was written. Pending prompts older than 3 days get an orange badge,
+  because they may be outdated.
+- **Finder-style flags.** Right-click a prompt (or use its `…` button) to give it a red, orange, yellow, green, blue, purple or gray flag.
 - **Drag & drop.** Reorder projects and prompts. To move a prompt to another project, drop it on that project
-  or click the project name on the card.
+  or, in **All** and **Flagged**, click the project name on the card.
 - **Light & dark.** Follows the system appearance.
 - **Local only.** Everything is stored in one JSON file on your Mac. The app makes no network requests.
 
@@ -52,7 +63,7 @@ The app is not notarized by Apple, so macOS will block the first launch. To open
 | `⌘↩` / `Esc` | Save / cancel editing |
 | `⌥`-click **Copy** | Copy and mark as done |
 
-To rename a project, double-click it. Right-click a prompt to flag, move or delete it.
+Double-click a project to rename it, right-click it to rename or delete it. Right-click a prompt (or click `…`) to flag, move or delete it.
 
 ## Development
 
@@ -60,18 +71,16 @@ To rename a project, double-click it. Right-click a prompt to flag, move or dele
 npm install
 npm start          # run the app
 npm run smoke      # UI smoke test against a temporary data file
-npm run dmg        # build dist/Prompt-Manager-<version>-arm64.dmg
+npm run dmg        # build dist/Prompt-Manager-<version>-arm64.dmg (macOS only)
 ```
 
-Plain Electron with vanilla HTML/CSS/JS and no frameworks. Data is stored in
-`~/Library/Application Support/Prompt Manager/data.json` and every save is written atomically.
+Plain Electron with vanilla HTML/CSS/JS, no frameworks and no runtime dependencies. Data is stored in
+`~/Library/Application Support/Prompt Manager/data.json`, and every save is written atomically.
 
-The GitHub Actions workflow builds the DMG on every push to `master`, where you can download it as a workflow artifact.
-Pushing a `v*` tag publishes it as a GitHub Release:
+GitHub Actions runs the smoke test and builds the DMG on every push to `master` and on every pull request;
+the DMG is available as a workflow artifact. Pushing a version tag publishes a GitHub Release.
 
-```bash
-git tag v1.0.0 && git push origin v1.0.0
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow, code conventions and the release process.
 
 ## License
 

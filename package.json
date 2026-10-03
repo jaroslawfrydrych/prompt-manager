@@ -21,7 +21,7 @@
   "scripts": {
     "start": "electron .",
     "smoke": "electron scripts/smoke.js",
-    "dist": "electron-packager . \"Prompt Manager\" --platform=darwin --out=dist --overwrite --icon=assets/icon.icns --app-bundle-id=com.jaroslawfrydrych.promptmanager --app-copyright=\"© 2026 Jarosław Frydrych\" --app-category-type=public.app-category.developer-tools --ignore=^/dist --ignore=^/scripts --ignore=^/docs --ignore=^/\\.github --ignore=^/\\.idea --ignore=^/\\.gitignore --ignore=^/README\\.md --ignore=^/assets/icon\\.icns",
+    "dist": "electron-packager . \"Prompt Manager\" --platform=darwin --out=dist --overwrite --icon=assets/icon.icns --app-bundle-id=com.jaroslawfrydrych.promptmanager --app-copyright=\"© 2026 Jarosław Frydrych\" --app-category-type=public.app-category.developer-tools --ignore=^/dist --ignore=^/scripts --ignore=^/docs --ignore=^/\\.github --ignore=^/\\.idea --ignore=^/\\.gitignore --ignore=^/README\\.md --ignore=^/CONTRIBUTING\\.md --ignore=^/\\.agents --ignore=^/\\.claude --ignore=^/assets/icon\\.icns",
     "dmg": "npm run dist && sh scripts/dmg.sh"
   },
   "devDependencies": {
