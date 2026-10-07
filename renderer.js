@@ -217,7 +217,9 @@ function renderList() {
     ta.addEventListener('input', () => { editing.draft = ta.value; editing.caret = ta.selectionStart; autosize(ta); });
     ta.addEventListener('keydown', editorKeys);
     // Switching to another app blurs too; keep editing then, the textarea refocuses on return.
-    ta.addEventListener('blur', () => setTimeout(() => { if (document.hasFocus()) commitEdit(true); }, 0));
+    // A re-render removes the textarea and blurs it as well; that edit was already handled
+    // (e.g. newPrompt committed it), so committing here would discard the next editor.
+    ta.addEventListener('blur', () => setTimeout(() => { if (document.hasFocus() && ta.isConnected) commitEdit(true); }, 0));
   }
 }
 

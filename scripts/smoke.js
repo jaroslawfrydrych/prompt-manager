@@ -60,6 +60,20 @@ app.on('browser-window-created', (_e, win) => {
       await wait(1500);
       assert.strictEqual(read().prompts.length, 3);
 
+      // a single ⌘N while editing saves the edit and opens one focused new editor
+      await js(`document.querySelector('.card[data-id=a] .body').click()`);
+      await wait(100);
+      await js(`const t = document.querySelector('textarea'); t.value = 'saved by cmd-n'; t.dispatchEvent(new Event('input'))`);
+      win.webContents.send('command', 'new-prompt');
+      await wait(300);
+      assert.strictEqual(await js(`document.querySelectorAll('textarea.editor').length`), 1);
+      assert.ok(await js(`document.activeElement === document.querySelector('textarea.editor')`));
+      assert.ok(await js(`editing && editing.isNew`));
+      assert.strictEqual(byId(await until((d) => byId(d, 'a').text === 'saved by cmd-n'), 'a').text, 'saved by cmd-n');
+      await js(`document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+      await wait(1500);
+      assert.strictEqual(read().prompts.length, 3);
+
       // flag, copy, done
       // context menu actions (the native menu itself can't be clicked from here)
       await js(`promptAction(state.prompts.find((p) => p.text === 'brand new'), 'flag:red')`);
