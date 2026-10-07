@@ -102,11 +102,13 @@ function emphasis(html, keep) {
   });
 }
 
-// Inline code is never formatted; in the editor (keep) it stays plain source text.
+// Inline code is never formatted; in the editor (keep) its backticks stay as dimmed .fm text around it,
+// and it is not spell checked (identifiers would all be underlined).
 function inline(text, keep) {
   return text.split(/(`[^`\n]+`)/).map((s, i) => {
     if (i % 2 === 0) return emphasis(esc(s), keep);
-    return keep ? esc(s) : `<code>${esc(s.slice(1, -1))}</code>`;
+    const code = esc(s.slice(1, -1));
+    return keep ? `<span class="fm">\`</span><code spellcheck="false">${code}</code><span class="fm">\`</span>` : `<code>${code}</code>`;
   }).join('');
 }
 
@@ -148,20 +150,25 @@ function listHtml(lines) {
   return html;
 }
 
+// A fence is a line starting with ``` (FENCE), the same rule the editor, lists and ⌘B use, so a ``` mid-line
+// is never a block. An unclosed fence runs to the end.
 function renderMarkdown(src) {
-  const re = /```([\w+#.-]*)[^\n]*\n?([\s\S]*?)(?:\n?```|$)/g;
+  const lines = src.split('\n');
   let out = '';
-  let last = 0;
-  let m;
-  while ((m = re.exec(src))) {
-    out += blocks(src.slice(last, m.index).replace(/\n+$/, ''));
-    out += `<div class="codeblock"><div class="cb-head"><span>${esc(m[1] || 'code')}</span>`
+  let text = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!FENCE.test(lines[i])) { text.push(lines[i]); continue; }
+    const lang = lines[i].replace(FENCE, '').match(/^[\w+#.-]*/)[0];
+    let j = i + 1;
+    while (j < lines.length && !FENCE.test(lines[j])) j++;
+    out += blocks(text.join('\n').replace(/\n+$/, ''));
+    out += `<div class="codeblock"><div class="cb-head"><span>${esc(lang || 'code')}</span>`
       + `<button class="cb-copy" title="Copy code">${ICONS.copy}</button></div>`
-      + `<pre><code>${esc(m[2])}</code></pre></div>`;
-    last = re.lastIndex;
-    while (src[last] === '\n') last++;
+      + `<pre><code>${esc(lines.slice(i + 1, j).join('\n'))}</code></pre></div>`;
+    text = [];
+    for (i = j; lines[i + 1] === ''; i++); // blank lines after a block don't render
   }
-  return out + blocks(src.slice(last));
+  return out + blocks(text.join('\n'));
 }
 
 // ---------- live editor ----------
@@ -173,11 +180,20 @@ function renderMarkdown(src) {
 function decorate(src) {
   if (!src) return ''; // truly empty, so the :empty placeholder shows
   let fence = false;
-  return src.split('\n').map((line) => {
-    const code = fence || FENCE.test(line); // fences and the code between them are left unformatted
-    if (FENCE.test(line)) fence = !fence;
-    const m = !code && LIST.exec(line);
-    if (!m) return `<div class="ln">${!line ? '<br>' : code ? esc(line) : inline(line, true)}</div>`;
+  return src.split('\n').map((line, i, all) => {
+    const isFence = FENCE.test(line);
+    const code = fence || isFence; // fences and the code between them are left unformatted
+    if (code) {
+      // A block like the preview's: .cb-first is the opener (its ``` and language dimmed, like the header),
+      // .cb-last the closer, or the last line while the fence is still open.
+      const cls = `${!fence ? ' cb-first' : ''}${(fence && isFence) || i === all.length - 1 ? ' cb-last' : ''}`;
+      if (isFence) fence = !fence;
+      const body = isFence ? line.replace(/^( *)(```)(.*)/, (x, ind, tick, rest) => `${ind}<span class="fm">${tick}</span>${esc(rest)}`)
+        : !line ? '<br>' : esc(line);
+      return `<div class="ln cb${cls}" spellcheck="false">${body}</div>`;
+    }
+    const m = LIST.exec(line);
+    if (!m) return `<div class="ln">${!line ? '<br>' : inline(line, true)}</div>`;
     // w<n>: marker width in (monospace) characters, for the hanging indent in CSS.
     return `<div class="ln li w${Math.min(m[0].length, 20)}"><span class="mk">${esc(m[0])}</span>${inline(line.slice(m[0].length), true)}</div>`;
   }).join('');
@@ -320,8 +336,27 @@ function enterEdit(text, { start, end }, plain) {
   text = text.slice(0, start) + text.slice(end);
   const ls = text.lastIndexOf('\n', start - 1) + 1;
   const le = text.indexOf('\n', start) < 0 ? text.length : text.indexOf('\n', start);
-  const m = !plain && !inFence(text, ls) && LIST.exec(text.slice(ls, le));
-  let ins = '\n';
+  const line = text.slice(ls, le);
+  const fenced = inFence(text, ls);
+  // ``` + ↩ (not ⇧↩) at the end of an opener that nothing closes yet adds the closing fence, caret on the line between.
+  if (!plain && !fenced && start === le && /^ *```[\w+#.-]*$/.test(line)
+    && (text.slice(le).match(/^ *```/gm) || []).length % 2 === 0) {
+    const ind = /^ */.exec(line)[0];
+    return [`${text.slice(0, le)}\n${ind}\n${ind}\`\`\`${text.slice(le)}`, { start: le + 1 + ind.length, end: le + 1 + ind.length }];
+  }
+  // Typing the closer by habit right above the auto-inserted one steps over it: the duplicate goes,
+  // the caret lands on the line after the closer (a new empty one at the end). Not when the next line
+  // opens another block (an odd number of fences after it).
+  const nl = text.indexOf('\n', le + 1);
+  if (!plain && fenced && start === le && /^ *```$/.test(line) && le < text.length
+    && /^ *```$/.test(text.slice(le + 1, nl < 0 ? text.length : nl))
+    && (text.slice(nl < 0 ? text.length : nl).match(/^ *```/gm) || []).length % 2 === 0) {
+    const rest = nl < 0 ? '\n' : text.slice(nl);
+    return [text.slice(0, le) + rest, { start: le + 1, end: le + 1 }];
+  }
+  const m = !plain && !fenced && LIST.exec(line);
+  // In a code block a new line keeps the current line's indentation, like a code editor (⇧↩ doesn't).
+  let ins = fenced && !plain ? `\n${/^[ \t]*/.exec(text.slice(ls, start))[0]}` : '\n';
   if (m && start >= ls + m[0].length) {
     if (!text.slice(ls + m[0].length, le).trim()) {
       // An empty nested item moves up a level (like Notes); an empty top-level one ends the list,

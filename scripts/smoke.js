@@ -264,7 +264,7 @@ app.on('browser-window-created', (_e, win) => {
       assert.strictEqual(await style('strong', 'fontWeight'), '600');
       assert.strictEqual(await style('em', 'fontStyle'), 'italic');
       assert.ok((await style('u', 'textDecorationLine')).includes('underline'));
-      assert.strictEqual(await js(`[...${ed}.querySelectorAll('.fm')].map((e) => e.textContent).join(' ')`), '** ** * * <u> </u>');
+      assert.strictEqual(await js(`[...${ed}.querySelectorAll('.fm')].map((e) => e.textContent).join(' ')`), '** ** * * <u> </u> ` `');
       assert.ok(await js(`readText(${ed}) === editing.draft`));
       // Format ▸ Bold (⌘B) wraps the selection, again unwraps it; a bare caret gets an empty pair; one undo step each
       await js(`setSel(${ed}, { start: 19, end: 20 })`);
@@ -392,6 +392,79 @@ app.on('browser-window-created', (_e, win) => {
         'Exclude **/node_modules/** and *.min.js', 'a*b + c*d', '2*3*4', 'foo.*',
         'Files: README*, LICENSE*, CHANGELOG*', 'Branches feature*, fix* and release*', 'Match log*, tmp* and cache*',
         'Delete test*; keep main*', 'Prefixes (api*, web*) only', 'Tables user*, order*', 'The H*-algorithm and A*-search']) assert.strictEqual(await md(t), t);
+
+      // code live in the editor: inline code in the code face with dimmed backticks, not spell checked
+      await js(`newPrompt(); document.execCommand('insertText', false, 'say \`x *y*\` now')`);
+      assert.strictEqual(await js(`${ed}.querySelector('code').textContent`), 'x *y*');
+      assert.ok(/mono|menlo/i.test(await style('code', 'fontFamily')));
+      assert.strictEqual(await js(`[...${ed}.querySelectorAll('.fm')].map((e) => e.textContent).join('')`), '``');
+      assert.strictEqual(await js(`${ed}.querySelector('code').spellcheck`), false);
+      assert.ok(await js(`readText(${ed}) === editing.draft`));
+      // a fenced block: opener / inner / closer lines, no list or emphasis inside, language dimmed, whitespace kept
+      const block = 'a\n```js\n- not list\n\t**no**  x\n```\nb';
+      await js(`document.execCommand('selectAll'); document.execCommand('insertText', false, ${JSON.stringify(block)})`);
+      assert.deepStrictEqual(await js(`[...${ed}.children].map((l) => l.className)`),
+        ['ln', 'ln cb cb-first', 'ln cb', 'ln cb', 'ln cb cb-last', 'ln']);
+      assert.strictEqual(await js(`${ed}.querySelectorAll('.cb strong, .cb .mk, .cb.li').length`), 0);
+      assert.strictEqual(await js(`${ed}.querySelectorAll('.cb')[2].textContent`), '\t**no**  x');
+      assert.strictEqual(await js(`${ed}.querySelector('.cb').spellcheck`), false);
+      assert.strictEqual(await style('.cb-first', 'color'), await style('.fm', 'color'));
+      assert.notStrictEqual(await style('.cb + .cb', 'color'), await style('.fm', 'color'));
+      assert.ok(/mono|menlo/i.test(await style('.cb', 'fontFamily')));
+      assert.ok(await js(`readText(${ed}) === editing.draft`));
+      // an unclosed fence is code to the end
+      await js(`document.execCommand('selectAll'); document.execCommand('insertText', false, 'x\\n\`\`\`\\ny')`);
+      assert.deepStrictEqual(await js(`[...${ed}.children].map((l) => l.className)`), ['ln', 'ln cb cb-first', 'ln cb cb-last']);
+      // ``` + ↩ closes the fence (one undo step); ↩ in a block keeps the line's indentation
+      await js(`document.execCommand('selectAll'); document.execCommand('insertText', false, 'run:\\n\`\`\`sh')`);
+      await key('Enter');
+      assert.strictEqual(await draft(), 'run:\n```sh\n\n```');
+      await type('  ls');
+      await key('Enter');
+      await type('pwd');
+      assert.strictEqual(await draft(), 'run:\n```sh\n  ls\n  pwd\n```');
+      await cmd('undo');
+      await cmd('undo');
+      await cmd('undo');
+      await cmd('undo');
+      assert.strictEqual(await draft(), 'run:\n```sh');
+      assert.deepStrictEqual(await edit('enterEdit', '```js\n```', 5), ['```js\n\n```', { start: 6, end: 6 }]);
+      assert.deepStrictEqual(await edit('enterEdit', '```\n  - x', 9), ['```\n  - x\n  ', { start: 12, end: 12 }]);
+      await cmd('redo');
+      await cmd('redo');
+      await cmd('redo');
+      await cmd('redo');
+      await key('Enter', { metaKey: true });
+      const sh = 'run:\n```sh\n  ls\n  pwd\n```';
+      assert.ok((await until((d) => d.prompts.some((p) => p.text === sh))).prompts.some((p) => p.text === sh));
+      // typing the closer by habit above the auto-inserted one steps over it: one closer, caret after the block
+      await js('newPrompt()');
+      await type('```js');
+      await key('Enter');
+      await type('x');
+      await key('Enter');
+      await type('```');
+      await key('Enter');
+      assert.strictEqual(await draft(), '```js\nx\n```\n');
+      assert.strictEqual(await js(`selOf(${ed}).start`), 12);
+      await type('after');
+      assert.deepStrictEqual(await js(`[...${ed}.children].map((l) => l.className)`), ['ln cb cb-first', 'ln cb', 'ln cb cb-last', 'ln']);
+      await cmd('undo');
+      await cmd('undo');
+      assert.strictEqual(await draft(), '```js\nx\n```\n```');
+      await cmd('redo');
+      await cmd('redo');
+      await key('Enter', { metaKey: true });
+      assert.ok(await until((d) => d.prompts.some((p) => p.text === '```js\nx\n```\nafter')));
+      // ...but not over the opener of a following block
+      assert.deepStrictEqual(await edit('enterEdit', '```\na\n```\n```\nb\n```', 9), ['```\na\n```\n\n```\nb\n```', { start: 10, end: 10 }]);
+      assert.deepStrictEqual(await edit('enterEdit', '```\n```\n```\nb\n```', 7), ['```\n```\n\n```\nb\n```', { start: 8, end: 8 }]);
+      // preview and editor agree: a ``` mid-line is not a fence, an indented one is
+      const mid = '- item ```x``` here\n- next';
+      assert.strictEqual(await js(`const d = document.createElement('div'); d.innerHTML = renderMarkdown(${JSON.stringify(mid)}); d.querySelectorAll('.codeblock').length + ',' + d.querySelectorAll('li').length`), '0,2');
+      assert.strictEqual(await js(`const d = document.createElement('div'); d.innerHTML = decorate(${JSON.stringify(mid)}); d.querySelectorAll('.cb').length + ',' + d.querySelectorAll('.li').length`), '0,2');
+      assert.strictEqual(await js(`const d = document.createElement('div'); d.innerHTML = renderMarkdown('x\\n  \`\`\`py\\n  a = 1\\n\`\`\`\\n\\ny');
+        [d.firstChild.textContent, d.querySelector('.cb-head').textContent, d.querySelector('pre').textContent, d.lastChild.textContent].join('|')`), 'x|py|  a = 1|y');
 
       // app menu: Format sits after Edit, and no two items share an accelerator
       const items = (m) => m.items.flatMap((i) => [i, ...(i.submenu ? items(i.submenu) : [])]);

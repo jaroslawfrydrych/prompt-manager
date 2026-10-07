@@ -81,7 +81,9 @@ Rules that follow from the full rebuild:
 
 ## Markdown and the editor
 
-`renderMarkdown` supports fenced ```` ``` ```` blocks (with a language label and a copy button),
+`renderMarkdown` supports fenced ```` ``` ```` blocks (with a language label and a copy button; a fence is a line
+starting with ```` ``` ```` after optional spaces, the `FENCE` rule that `decorate`, `inFence`, `renumber` and
+`fmtRuns` use too, so a ```` ``` ```` mid-line is never a block, and an unclosed fence runs to the end),
 `` `inline code` ``, `-` / `*` / `1.` / `1)` lists nested by indentation (2 spaces per level), and `**bold**`,
 `*italic*` / `_italic_` and `<u>underline</u>` (`inline(text, keep)` → `emphasis`). Keep it small; prompts are pasted
 into agents as plain text. Emphasis runs on **escaped** text (so `<u>` is only the literal tag pair, never other HTML),
@@ -110,8 +112,15 @@ that enclose it, so ⌘A ⌘B on `<u>**x**</u>` unbolds) the runs are split arou
 the other parts are wrapped (a caret inside a word toggles the word; a caret against a run's marker steps across it
 instead of nesting an empty pair; an italic wrap whose `*` would merge into a neighbouring `*` uses `_`, so the `_`
 pass runs before the `*` passes). Native edits (`sync`) and paste / cut (`replaceSel`) go through `relist`, which
-renumbers only when the edit changed the line count, so a retyped number sticks. List lines hang after their
-marker: the marker is plain inline monospace text (never `inline-block`, which breaks ↑/↓ columns) and the line gets
+renumbers only when the edit changed the line count, so a retyped number sticks. Code is decorated too: inline
+code via `inline(text, true)` is a `<code spellcheck="false">` between dimmed `.fm` backticks, and every line of a
+fenced block (fences included) is a `.ln.cb` div with `spellcheck="false"`, never list or emphasis decorated;
+`.cb-first` is the opener (dimmed, drawn like the preview's header), `.cb-last` the closer or, while unclosed, the
+last line, so the lines together look like the preview's `.codeblock`. In a block `enterEdit` keeps the line's
+indentation (not on ⇧↩), and ↩ at the end of an opener nothing closes yet inserts the closing fence (one undo
+step); ↩ after a typed closer directly above another bare closer steps over it (the duplicate goes, caret on the
+line after) unless that bare line opens a following block. List lines hang after their marker: the marker is plain
+inline monospace text (never `inline-block`, which breaks ↑/↓ columns) and the line gets
 a `.w<n>` class (marker length) that sets `padding-left` and a negative `text-indent`.
 
 ## Styling

@@ -30,7 +30,8 @@ Prompt Manager is where those prompts wait their turn.
 - **One queue per project.** A Mail-style sidebar lists your projects, each with its pending count.
   **All** shows prompts from every project, **Flagged** only the flagged ones.
 - **Prompts are plain text.** Click a prompt to edit it, `⌘↩` to save. Spelling is checked as you type; right-click a word for suggestions. Fenced ```` ``` ```` code blocks, `` `inline code` `` and `-` / `1.` lists are rendered,
-  and every code block has its own copy button. `**bold**`, `*italic*` and `<u>underline</u>` show formatted as you type
+  and every code block has its own copy button (a fence must start a line: ```` ``` ```` mid-line is not a code block). Code shows as code while you type too: in a block `↩` keeps the line's indentation,
+  and ```` ``` ```` + `↩` adds the closing fence. `**bold**`, `*italic*` and `<u>underline</u>` show formatted as you type
   (the markers stay visible, dimmed); `⌘B` / `⌘I` / `⌘U` toggle them on the selection. Lists are formatted live while you type: `↩` continues a list
   (on an empty item it moves it up a level, or ends the list) and `⇥` / `⇧⇥` nest an item; numbers stay in sequence.
 - **Copy, paste, done.** One click copies the whole prompt, ready to paste into your agent. `⌥`-click also marks it as done.
