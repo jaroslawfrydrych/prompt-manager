@@ -253,6 +253,7 @@ button.chip:hover { background: var(--fill-3); color: var(--text); }
 
 .body ul, .body ol { margin: 0; padding-left: 1.5em; }
 .body li::marker { color: var(--text-2); }
+.body strong, .editor strong { font-weight: 600; }
 
 .editor {
   position: relative; min-height: 66px; outline: 0;
@@ -268,7 +269,10 @@ button.chip:hover { background: var(--fill-3); color: var(--text); }
 .editor .w7 { --w: 7; } .editor .w8 { --w: 8; } .editor .w9 { --w: 9; } .editor .w10 { --w: 10; } .editor .w11 { --w: 11; }
 .editor .w12 { --w: 12; } .editor .w13 { --w: 13; } .editor .w14 { --w: 14; } .editor .w15 { --w: 15; } .editor .w16 { --w: 16; }
 .editor .w17 { --w: 17; } .editor .w18 { --w: 18; } .editor .w19 { --w: 19; } .editor .w20 { --w: 20; }
+/* Emphasis markers stay in the source text, dimmed and in the plain face. */
+.editor .fm { color: var(--text-3); font-weight: 400; font-style: normal; }
 .edit-hint { margin-top: 10px; font-size: 11px; color: var(--text-3); }
+.edit-hint > span { white-space: nowrap; } /* wraps only between groups */
 .edit-hint code { white-space: nowrap; font: 10.5px var(--mono); padding: 1px 4px; border-radius: 4px; background: var(--inline-code-bg); color: var(--text-2); }
 
 /* ---------- drag & drop ---------- */

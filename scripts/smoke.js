@@ -250,6 +250,155 @@ app.on('browser-window-created', (_e, win) => {
       // list markers inside a code block are not a list
       assert.strictEqual(await js(`const d = document.createElement('div'); d.innerHTML = renderMarkdown('x\\n\`\`\`\\n- no\\n\`\`\`'); d.querySelectorAll('ul').length`), 0);
 
+      // bold / italic / underline in preview: not in code, not for snake_case or list markers, <u> never passes other HTML
+      const md = (s) => js(`const d = document.createElement('div'); d.innerHTML = renderMarkdown(${JSON.stringify(s)}); d.innerHTML`);
+      assert.strictEqual(await md('**b** *i* _j_ <u>u</u> ***bi*** **a *n* b** snake_case_words'),
+        '<strong>b</strong> <em>i</em> <em>j</em> <u>u</u> <strong><em>bi</em></strong> <strong>a <em>n</em> b</strong> snake_case_words');
+      assert.strictEqual(await md('* item *x*'), '<ul><li>item <em>x</em></li></ul>');
+      assert.strictEqual(await md('`a*b*c` **d**'), '<code>a*b*c</code> <strong>d</strong>');
+      assert.ok(!(await md('```\n**no** _no_\n```')).includes('<strong>'));
+      assert.strictEqual(await md('<u><img src=x onerror=alert(1)></u>'), '<u>&lt;img src=x onerror=alert(1)&gt;</u>');
+      // ... and live in the editor: formatted runs with the markers kept (dimmed), text still equals the draft
+      await js(`newPrompt(); document.execCommand('insertText', false, '**b** *i* <u>u</u> x\\n\`*c*\`')`);
+      const style = (sel, prop) => js(`getComputedStyle(${ed}.querySelector('${sel}')).${prop}`);
+      assert.strictEqual(await style('strong', 'fontWeight'), '600');
+      assert.strictEqual(await style('em', 'fontStyle'), 'italic');
+      assert.ok((await style('u', 'textDecorationLine')).includes('underline'));
+      assert.strictEqual(await js(`[...${ed}.querySelectorAll('.fm')].map((e) => e.textContent).join(' ')`), '** ** * * <u> </u>');
+      assert.ok(await js(`readText(${ed}) === editing.draft`));
+      // Format ▸ Bold (⌘B) wraps the selection, again unwraps it; a bare caret gets an empty pair; one undo step each
+      await js(`setSel(${ed}, { start: 19, end: 20 })`);
+      await cmd('bold');
+      assert.strictEqual(await draft(), '**b** *i* <u>u</u> **x**\n`*c*`');
+      assert.deepStrictEqual(await js(`selOf(${ed})`), { start: 21, end: 22 });
+      await cmd('bold');
+      assert.strictEqual(await draft(), '**b** *i* <u>u</u> x\n`*c*`');
+      await js(`setSel(${ed}, { start: 20, end: 20 })`);
+      await cmd('bold');
+      assert.strictEqual(await draft(), '**b** *i* <u>u</u> x****\n`*c*`');
+      assert.deepStrictEqual(await js(`selOf(${ed})`), { start: 22, end: 22 });
+      await cmd('undo');
+      assert.strictEqual(await draft(), '**b** *i* <u>u</u> x\n`*c*`');
+      await cmd('underline');
+      await cmd('italic');
+      assert.strictEqual(await draft(), '**b** *i* <u>u</u> x<u>**</u>\n`*c*`');
+      await js(`setSel(${ed}, { start: 3, end: 3 })`); // caret at **b|** steps out of the run
+      await cmd('bold');
+      assert.strictEqual(await draft(), '**b** *i* <u>u</u> x<u>**</u>\n`*c*`');
+      assert.deepStrictEqual(await js(`selOf(${ed})`), { start: 5, end: 5 });
+      // a space typed before toggling off moves out past the closer, so what's typed next is plain
+      for (const [k, o] of [['bold', '**'], ['italic', '*']]) {
+        await js(`document.execCommand('selectAll'); document.execCommand('insertText', false, 'Text ')`);
+        await cmd(k);
+        await type('it ');
+        await cmd(k);
+        await type('rest');
+        assert.strictEqual(await draft(), `Text ${o}it${o} rest`);
+      }
+      assert.deepStrictEqual(await js(`fmtEdit('Text _it _', { start: 9, end: 9 }, 'italic')`), ['Text _it_ ', { start: 10, end: 10 }]);
+      // a pair right after a letter renders once typed into
+      await cmd('bold');
+      await type('more');
+      assert.strictEqual(await draft(), 'Text *it* rest**more**');
+      assert.strictEqual(await js(`${ed}.querySelector('strong').textContent`), 'more');
+      // ⌘A then the inner format's key removes it from a line with two formats
+      await js(`document.execCommand('selectAll'); document.execCommand('insertText', false, 'Fix the bug')`);
+      for (const k of ['bold', 'underline', 'bold']) {
+        await js(`document.execCommand('selectAll')`);
+        await cmd(k);
+      }
+      assert.strictEqual(await draft(), '<u>Fix the bug</u>');
+      await key('Escape');
+      assert.deepStrictEqual(await edit('fmtEdit', '**bold**', 4, "'bold'"), ['bold', { start: 2, end: 2 }]);
+      assert.deepStrictEqual(await js(`fmtEdit('**bold**', { start: 2, end: 6 }, 'italic')`), ['***bold***', { start: 3, end: 7 }]);
+      assert.deepStrictEqual(await js(`fmtEdit('***x***', { start: 0, end: 7 }, 'bold')`), ['*x*', { start: 1, end: 2 }]);
+      for (const [t, k, out] of [['<u>**Fix the bug**</u>', 'bold', '<u>Fix the bug</u>'], ['**<u>x</u>**', 'underline', '**x**'],
+        ['<u>*x*</u>', 'italic', '<u>x</u>'], ['<u>***x***</u>', 'bold', '<u>*x*</u>'],
+        ['Say <u>**Fix**</u> now', 'bold', '**Say <u>Fix</u> now**']]) {
+        assert.strictEqual((await js(`fmtEdit(${JSON.stringify(t)}, { start: 0, end: ${t.length} }, '${k}')`))[0], out);
+      }
+      assert.deepStrictEqual(await js(`fmtEdit('a _x_ b', { start: 3, end: 4 }, 'italic')`), ['a x b', { start: 2, end: 3 }]);
+      // each selected line is formatted on its own, past the list marker, never with whitespace at the edges
+      const fmt = (t, a, b, k) => js(`fmtEdit(${JSON.stringify(t)}, { start: ${a}, end: ${b} }, '${k}')`);
+      assert.deepStrictEqual(await fmt('a\n- b\n', 0, 6, 'bold'), ['**a**\n- **b**\n', { start: 2, end: 11 }]);
+      assert.deepStrictEqual(await fmt('**a**\n- **b**\n', 2, 11, 'bold'), ['a\n- b\n', { start: 0, end: 5 }]);
+      assert.deepStrictEqual(await fmt('**a**\nb', 0, 7, 'bold'), ['**a**\n**b**', { start: 2, end: 9 }]);
+      assert.deepStrictEqual(await fmt(' foo ', 0, 5, 'italic'), [' *foo* ', { start: 2, end: 5 }]);
+      assert.deepStrictEqual(await fmt('```\n**x**\n```', 0, 13, 'bold'), ['```\n**x**\n```', { start: 0, end: 13 }]);
+      // toggling part of a run splits it instead of nesting markers
+      assert.deepStrictEqual(await fmt('**hello world**', 2, 7, 'bold'), ['hello **world**', { start: 0, end: 5 }]);
+      assert.deepStrictEqual(await fmt('**hello world**', 4, 4, 'bold'), ['hello **world**', { start: 2, end: 2 }]);
+      assert.deepStrictEqual(await fmt('*hello world*', 7, 12, 'italic'), ['*hello* world', { start: 8, end: 13 }]);
+      assert.deepStrictEqual(await fmt('a _b c d_', 5, 6, 'italic'), ['a _b_ c _d_', { start: 6, end: 7 }]);
+      assert.deepStrictEqual(await fmt('<u>hello world</u>', 3, 8, 'underline'), ['hello <u>world</u>', { start: 0, end: 5 }]);
+      assert.deepStrictEqual(await fmt('a **b** c', 0, 9, 'bold'), ['**a b c**', { start: 2, end: 7 }]);
+      // a caret against a run's marker steps out of it; a selection touching a run merges into it
+      assert.deepStrictEqual(await fmt('a **b**', 5, 5, 'bold'), ['a **b**', { start: 7, end: 7 }]);
+      assert.deepStrictEqual(await fmt('a **b**', 4, 4, 'bold'), ['a **b**', { start: 2, end: 2 }]);
+      assert.deepStrictEqual(await fmt('this is *it*', 11, 11, 'italic'), ['this is *it*', { start: 12, end: 12 }]);
+      assert.deepStrictEqual(await fmt('this is <u>u</u>', 12, 12, 'underline'), ['this is <u>u</u>', { start: 16, end: 16 }]);
+      assert.deepStrictEqual(await fmt('***x***', 4, 4, 'italic'), ['***x***', { start: 7, end: 7 }]);
+      // a caret inside a run of that kind but outside a word never nests a pair in the run
+      assert.deepStrictEqual(await fmt('**hello world**', 7, 7, 'bold'), ['**hello world**', { start: 7, end: 7 }]);
+      assert.deepStrictEqual(await fmt('**a *b* c**', 6, 6, 'bold'), ['**a *b* c**', { start: 6, end: 6 }]);
+      assert.deepStrictEqual(await fmt('<u>hello world</u>', 8, 8, 'underline'), ['<u>hello world</u>', { start: 8, end: 8 }]);
+      assert.deepStrictEqual(await fmt('**Note:**text', 9, 13, 'bold'), ['**Note:text**', { start: 2, end: 11 }]);
+      assert.deepStrictEqual(await fmt('text**More**', 0, 4, 'bold'), ['**textMore**', { start: 2, end: 10 }]);
+      assert.deepStrictEqual(await fmt('**a**,', 5, 6, 'bold'), ['**a,**', { start: 2, end: 4 }]);
+      // a caret just outside a run's marker steps into the run (⌘B toggles what's typed next), never an empty pair
+      // at its edge, which would break the run
+      assert.deepStrictEqual(await fmt('**b**', 5, 5, 'bold'), ['**b**', { start: 3, end: 3 }]);
+      assert.deepStrictEqual(await fmt('**b**', 0, 0, 'bold'), ['**b**', { start: 2, end: 2 }]);
+      assert.deepStrictEqual(await fmt('<u>w</u>', 8, 8, 'underline'), ['<u>w</u>', { start: 4, end: 4 }]);
+      assert.deepStrictEqual(await fmt('**b**', 5, 5, 'italic'), ['**b**', { start: 5, end: 5 }]);
+      // an italic marker that would touch a * is an underscore, and a second press unwraps it
+      assert.deepStrictEqual(await fmt('**Note:** do the thing', 0, 22, 'italic'), ['_**Note:** do the thing_', { start: 1, end: 23 }]);
+      assert.deepStrictEqual(await fmt('_**Note:** do the thing_', 1, 23, 'italic'), ['**Note:** do the thing', { start: 0, end: 22 }]);
+      assert.strictEqual(await md('_**Note:** do the thing_'), '<em><strong>Note:</strong> do the thing</em>');
+      // nothing to format inside `code`
+      assert.deepStrictEqual(await fmt('x `a b` y', 4, 4, 'bold'), ['x `a b` y', { start: 4, end: 4 }]);
+      assert.deepStrictEqual(await fmt('**a**`c`', 5, 8, 'bold'), ['**a**`c`', { start: 5, end: 8 }]);
+      // a selection across code formats the text around it, and a second press unwraps it again
+      assert.deepStrictEqual(await fmt('x `a b` y', 0, 9, 'bold'), ['**x** `a b` **y**', { start: 2, end: 15 }]);
+      assert.deepStrictEqual(await fmt('**x** `a b` **y**', 2, 15, 'bold'), ['x `a b` y', { start: 0, end: 9 }]);
+      const two = 'line one `c`\nline two `d`';
+      const [twoB, twoS] = await fmt(two, 0, two.length, 'bold');
+      assert.strictEqual(twoB, '**line one** `c`\n**line two** `d`');
+      assert.strictEqual((await fmt(twoB, 0, twoB.length, 'bold'))[0], two);
+      assert.strictEqual((await fmt(twoB, twoS.start, twoS.end, 'bold'))[0], two);
+      // a wrap that wouldn't render is skipped (never doubled); a mid-word selection takes the whole word
+      assert.deepStrictEqual(await fmt('foo.js', 5, 5, 'bold'), ['foo.js', { start: 5, end: 5 }]);
+      assert.deepStrictEqual(await fmt('foo.js', 4, 6, 'bold'), ['foo.js', { start: 4, end: 6 }]);
+      assert.deepStrictEqual(await fmt('hello world', 1, 11, 'bold'), ['**hello world**', { start: 2, end: 13 }]);
+      assert.deepStrictEqual(await fmt('foo', 0, 2, 'bold'), ['**foo**', { start: 2, end: 5 }]);
+      assert.deepStrictEqual(await fmt('x `a b` y', 3, 6, 'italic'), ['x `a b` y', { start: 3, end: 6 }]);
+      // a selection cutting into a run of another kind takes the whole run; a second press restores it
+      assert.deepStrictEqual(await fmt('hello *world foo* bar', 0, 12, 'underline'), ['<u>hello *world foo*</u> bar', { start: 3, end: 20 }]);
+      assert.deepStrictEqual(await fmt('<u>hello *world foo*</u> bar', 3, 20, 'underline'), ['hello *world foo* bar', { start: 0, end: 17 }]);
+      assert.deepStrictEqual(await fmt('see <u>w</u> x', 5, 6, 'bold'), ['see **<u>w</u>** x', { start: 6, end: 14 }]);
+      // a caret before or in a list marker works past it; one inside any run's marker steps out of it
+      assert.deepStrictEqual(await fmt('- item', 0, 0, 'bold'), ['- ****item', { start: 4, end: 4 }]);
+      assert.deepStrictEqual(await fmt('1. item', 1, 1, 'bold'), ['1. ****item', { start: 5, end: 5 }]);
+      assert.deepStrictEqual(await fmt('  - item', 2, 2, 'italic'), ['  - **item', { start: 5, end: 5 }]);
+      assert.deepStrictEqual(await fmt('**bold**', 1, 1, 'bold'), ['**bold**', { start: 0, end: 0 }]);
+      assert.deepStrictEqual(await fmt('<u>w</u>', 6, 6, 'underline'), ['<u>w</u>', { start: 8, end: 8 }]);
+      assert.deepStrictEqual(await fmt('<u>w</u>', 2, 2, 'bold'), ['****<u>w</u>', { start: 2, end: 2 }]);
+      // an edit that would leave markers as plain text is dropped
+      assert.deepStrictEqual(await fmt('*i* x', 0, 0, 'bold'), ['*i* x', { start: 0, end: 0 }]);
+      // globs and paths stay plain
+      assert.strictEqual(await md('src/*.js and lib/*.ts /_foo_bar_ src/**/*.js *it* _it_'),
+        'src/*.js and lib/*.ts /_foo_bar_ src/**/*.js <em>it</em> <em>it</em>');
+      for (const t of ['Patterns: *.md, docs/*.md', 'Search *.ts, *.tsx and **/*.js', 'Run on *.py/*.pyi',
+        'Exclude **/node_modules/** and *.min.js', 'a*b + c*d', '2*3*4', 'foo.*',
+        'Files: README*, LICENSE*, CHANGELOG*', 'Branches feature*, fix* and release*', 'Match log*, tmp* and cache*',
+        'Delete test*; keep main*', 'Prefixes (api*, web*) only', 'Tables user*, order*', 'The H*-algorithm and A*-search']) assert.strictEqual(await md(t), t);
+
+      // app menu: Format sits after Edit, and no two items share an accelerator
+      const items = (m) => m.items.flatMap((i) => [i, ...(i.submenu ? items(i.submenu) : [])]);
+      const accs = items(Menu.getApplicationMenu()).map((i) => i.accelerator).filter(Boolean);
+      assert.strictEqual(new Set(accs).size, accs.length, `duplicate accelerator: ${accs}`);
+      assert.deepStrictEqual(Menu.getApplicationMenu().items.map((i) => i.label).slice(1, 4), ['File', 'Edit', 'Format']);
+
       console.log('SMOKE OK');
       app.exit(0);
     } catch (err) {

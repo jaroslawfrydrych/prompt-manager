@@ -198,6 +198,15 @@ app.whenReady().then(() => {
       ],
     },
     {
+      // Markdown formatting for the prompt editor; the renderer ignores these in any other field.
+      label: 'Format',
+      submenu: [
+        { label: 'Bold', accelerator: 'CmdOrCtrl+B', click: send('bold') },
+        { label: 'Italic', accelerator: 'CmdOrCtrl+I', click: send('italic') },
+        { label: 'Underline', accelerator: 'CmdOrCtrl+U', click: send('underline') },
+      ],
+    },
+    {
       label: 'View',
       submenu: [
         { label: 'Find', accelerator: 'CmdOrCtrl+F', click: send('search') },

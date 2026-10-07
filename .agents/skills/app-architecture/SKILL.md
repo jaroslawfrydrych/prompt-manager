@@ -19,7 +19,7 @@ DOM or CSS feature before writing code, and never add a package for something a 
   - `copy(text)` → clipboard
   - `confirm(message, detail, okLabel)` → native warning dialog, resolves `true` on OK
   - `menu(items)` → native popup menu, resolves the clicked item's `id` (or index), `-1` when dismissed
-  - `onCommand(fn)` → commands sent from the app menu (`'new-prompt'`, `'new-project'`, `'search'`, `'undo'`, `'redo'`)
+  - `onCommand(fn)` → commands sent from the app menu (`'new-prompt'`, `'new-project'`, `'search'`, `'undo'`, `'redo'`, `'bold'`, `'italic'`, `'underline'`)
 - `renderer.js` — the entire UI in one file, sectioned with `// ---------- name ----------` comments.
 
 New IPC: add `ipcMain.handle` in `main.js`, expose it in `preload.js`, call `window.api.x()` in the renderer.
@@ -82,8 +82,16 @@ Rules that follow from the full rebuild:
 ## Markdown and the editor
 
 `renderMarkdown` supports fenced ```` ``` ```` blocks (with a language label and a copy button),
-`` `inline code` `` and `-` / `*` / `1.` / `1)` lists nested by indentation (2 spaces per level). Keep it small;
-prompts are pasted into agents as plain text.
+`` `inline code` ``, `-` / `*` / `1.` / `1)` lists nested by indentation (2 spaces per level), and `**bold**`,
+`*italic*` / `_italic_` and `<u>underline</u>` (`inline(text, keep)` → `emphasis`). Keep it small; prompts are pasted
+into agents as plain text. Emphasis runs on **escaped** text (so `<u>` is only the literal tag pair, never other HTML),
+never crosses a line, skips inline code and fences and lines over 2000 chars, and `*` / `_` only count at word
+edges (an opener never follows a digit, `/` or `.`, nor a letter for `_`, and a `*` opener follows a letter only
+when a letter or digit comes next, so `README*, LICENSE*` stays plain; a closer is never followed by a letter or
+digit, and a closing `*` never follows `/` nor precedes `.ext`, so snake_case, `src/*.js`, `*.md, docs/*.md` and
+`2*3*4` stay plain while `plain**bold**` renders). Each pass swaps its markers for private-use placeholders and
+keeps a match only if it nests cleanly with earlier ones; with `keep` (the editor) the markers stay in the text as
+dimmed `.fm` spans next to the `<strong>` / `<em>` / `<u>`.
 
 The editor is a `contenteditable="plaintext-only"` div that shows the markdown **source**, one `<div class="ln">` per
 line, decorated by `decorate(src)` (escaped text in spans). Its text (`readText(ed)`) always equals `editing.draft`;
@@ -93,7 +101,16 @@ Rewriting the DOM breaks native undo, so the editor keeps its own stack in `edit
 Edit ▸ Undo / Redo (⌘Z / ⇧⌘Z) are therefore not native roles: they send the `'undo'` / `'redo'` command, which
 runs `undoRedo` in the editor and `document.execCommand` in any other field. Edits made by key handling (Enter, Tab,
 paste, cut) go through `applyEdit` as pure `(text, selection) → [text, selection]` functions such as `enterEdit` and
-`tabEdit` (and `backEdit`: Backspace after a marker outdents / removes it); list edits end with `renumber`, which keeps numbered siblings consecutive and never touches lines inside a ```` ``` ```` fence. Native edits (`sync`) and paste / cut (`replaceSel`) go through `relist`, which renumbers only when the edit changed the line count, so a retyped number sticks. List lines hang after their
+`tabEdit` (and `backEdit`: Backspace after a marker outdents / removes it); list edits end with `renumber`, which
+keeps numbered siblings consecutive and never touches lines inside a ```` ``` ```` fence. Format ▸ Bold / Italic /
+Underline (⌘B / ⌘I / ⌘U) send `'bold'` / `'italic'` / `'underline'`, which run `fmtEdit` through `applyEdit`: each
+selected line is a part (past the list marker, edge whitespace trimmed, never in code); `emRuns(line)` maps the
+renderer's runs to raw offsets, and when every part sits in a run of that kind (looking past other kinds' markers
+that enclose it, so ⌘A ⌘B on `<u>**x**</u>` unbolds) the runs are split around it, else
+the other parts are wrapped (a caret inside a word toggles the word; a caret against a run's marker steps across it
+instead of nesting an empty pair; an italic wrap whose `*` would merge into a neighbouring `*` uses `_`, so the `_`
+pass runs before the `*` passes). Native edits (`sync`) and paste / cut (`replaceSel`) go through `relist`, which
+renumbers only when the edit changed the line count, so a retyped number sticks. List lines hang after their
 marker: the marker is plain inline monospace text (never `inline-block`, which breaks ↑/↓ columns) and the line gets
 a `.w<n>` class (marker length) that sets `padding-left` and a negative `text-indent`.
 
