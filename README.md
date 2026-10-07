@@ -29,7 +29,7 @@ Prompt Manager is where those prompts wait their turn.
 
 - **One queue per project.** A Mail-style sidebar lists your projects, each with its pending count.
   **All** shows prompts from every project, **Flagged** only the flagged ones.
-- **Prompts are plain text.** Click a prompt to edit it, `⌘↩` to save. Fenced ```` ``` ```` code blocks and `` `inline code` `` are rendered,
+- **Prompts are plain text.** Click a prompt to edit it, `⌘↩` to save. Spelling is checked as you type; right-click a word for suggestions. Fenced ```` ``` ```` code blocks and `` `inline code` `` are rendered,
   and every code block has its own copy button.
 - **Copy, paste, done.** One click copies the whole prompt, ready to paste into your agent. `⌥`-click also marks it as done.
   Done prompts move to a **Done** tab, where you can restore them.

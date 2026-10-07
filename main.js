@@ -124,6 +124,27 @@ function createWindow() {
     },
   });
   lockDown(win);
+  // Text fields get the macOS edit menu with spelling suggestions on top. Any field that is editable
+  // (input, textarea, contenteditable); the renderer's own card/project menus preventDefault, so this never fires for them.
+  win.webContents.on('context-menu', (_e, { isEditable, misspelledWord, dictionarySuggestions, editFlags }) => {
+    if (!isEditable) return;
+    const wc = win.webContents;
+    const spelling = misspelledWord ? [
+      ...dictionarySuggestions.map((s) => ({ label: s, click: () => wc.replaceMisspelling(s) })),
+      ...(dictionarySuggestions.length ? [] : [{ label: 'No Guesses Found', enabled: false }]),
+      { type: 'separator' },
+      { label: 'Learn Spelling', click: () => wc.session.addWordToSpellCheckerDictionary(misspelledWord) },
+      { type: 'separator' },
+    ] : [];
+    Menu.buildFromTemplate([
+      ...spelling,
+      { role: 'cut', enabled: editFlags.canCut },
+      { role: 'copy', enabled: editFlags.canCopy },
+      { role: 'paste', enabled: editFlags.canPaste },
+      { type: 'separator' },
+      { role: 'selectAll', enabled: editFlags.canSelectAll },
+    ]).popup({ window: win });
+  });
   win.loadFile(path.join(__dirname, 'index.html'));
 }
 

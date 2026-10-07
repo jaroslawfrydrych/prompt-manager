@@ -162,7 +162,7 @@ function cardHtml(p) {
   const proj = project(p.projectId);
   const doneLabel = p.doneAt ? `done ${ago(p.doneAt)}` : '';
   const body = isEditing
-    ? `<textarea class="editor" placeholder="What are we working on?" spellcheck="false"></textarea>
+    ? `<textarea class="editor" placeholder="What are we working on?"></textarea>
        <div class="edit-hint"><kbd>⌘</kbd><kbd>↩</kbd> save &nbsp;·&nbsp; <kbd>esc</kbd> cancel &nbsp;·&nbsp; <code>\`code\`</code> &nbsp; <code>\`\`\`block\`\`\`</code></div>`
     : `<div class="body">${renderMarkdown(p.text)}</div>`;
 

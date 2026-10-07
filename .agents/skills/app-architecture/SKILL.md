@@ -68,6 +68,8 @@ Rules that follow from the full rebuild:
 ## Adding UI actions
 
 - Card and empty-state buttons carry `data-act="name"`; handle them in the `#list` click handler.
+- Editable fields (any input/textarea/contenteditable) get the native edit + spelling menu from the
+  `context-menu` handler in `main.js`; renderer menus must `preventDefault()` the `contextmenu` event to replace it.
 - Context menu entries go into `promptMenu` / `projectMenu` with ids like `'flag:red'`, `'move:<projectId>'`
   and are executed by `promptAction(p, id)`. Menu item shape (see `menuTemplate` in `main.js`):
   `'-'` separator, a plain string (resolves to its index), or

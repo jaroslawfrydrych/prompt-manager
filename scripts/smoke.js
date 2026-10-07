@@ -1,5 +1,5 @@
 // Smoke test: `npx electron scripts/smoke.js` — drives the real UI against a temp data file.
-const { app, clipboard } = require('electron');
+const { app, clipboard, Menu } = require('electron');
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
@@ -73,6 +73,23 @@ app.on('browser-window-created', (_e, win) => {
       await js(`document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
       await wait(1500);
       assert.strictEqual(read().prompts.length, 3);
+
+      // spell checking: editor is checked, right-click on a misspelling offers suggestions (popup captured, not shown)
+      await js(`newPrompt()`);
+      assert.ok(await js(`document.querySelector('.editor').spellcheck`));
+      assert.ok(win.webContents.session.isSpellCheckerEnabled());
+      const { popup } = Menu.prototype;
+      let shown;
+      Menu.prototype.popup = function () { shown = this; };
+      const flags = { canCut: true, canCopy: true, canPaste: true, canSelectAll: true };
+      win.webContents.emit('context-menu', {}, { isEditable: true, misspelledWord: 'promtp', dictionarySuggestions: ['prompt'], editFlags: flags });
+      assert.deepStrictEqual(shown.items.map((i) => i.label || i.role || i.type),
+        ['prompt', 'separator', 'Learn Spelling', 'separator', 'Cut', 'Copy', 'Paste', 'separator', 'Select All']);
+      shown = null;
+      win.webContents.emit('context-menu', {}, { isEditable: false, editFlags: flags });
+      assert.strictEqual(shown, null);
+      Menu.prototype.popup = popup;
+      await js(`document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
 
       // flag, copy, done
       // context menu actions (the native menu itself can't be clicked from here)
