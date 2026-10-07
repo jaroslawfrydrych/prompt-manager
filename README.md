@@ -29,8 +29,9 @@ Prompt Manager is where those prompts wait their turn.
 
 - **One queue per project.** A Mail-style sidebar lists your projects, each with its pending count.
   **All** shows prompts from every project, **Flagged** only the flagged ones.
-- **Prompts are plain text.** Click a prompt to edit it, `⌘↩` to save. Spelling is checked as you type; right-click a word for suggestions. Fenced ```` ``` ```` code blocks and `` `inline code` `` are rendered,
-  and every code block has its own copy button.
+- **Prompts are plain text.** Click a prompt to edit it, `⌘↩` to save. Spelling is checked as you type; right-click a word for suggestions. Fenced ```` ``` ```` code blocks, `` `inline code` `` and `-` / `1.` lists are rendered,
+  and every code block has its own copy button. Lists are formatted live while you type: `↩` continues a list
+  (on an empty item it moves it up a level, or ends the list) and `⇥` / `⇧⇥` nest an item; numbers stay in sequence.
 - **Copy, paste, done.** One click copies the whole prompt, ready to paste into your agent. `⌥`-click also marks it as done.
   Done prompts move to a **Done** tab, where you can restore them.
 - **See what's getting old.** Every prompt shows when it was written. Pending prompts older than 3 days get an orange badge,
@@ -61,6 +62,7 @@ The app is not notarized by Apple, so macOS will block the first launch. To open
 | `⌘1`–`⌘9` / `⌘0` | Jump to project / All |
 | `⌘F` | Search |
 | `⌘↩` / `Esc` | Save / cancel editing |
+| `⇥` / `⇧⇥` | Indent / outdent a list item while editing |
 | `⌥`-click **Copy** | Copy and mark as done |
 
 Double-click a project to rename it, right-click it to rename or delete it. Right-click a prompt (or click `…`) to flag, move or delete it.

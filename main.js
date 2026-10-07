@@ -180,7 +180,23 @@ app.whenReady().then(() => {
         { role: 'close' },
       ],
     },
-    { role: 'editMenu' },
+    {
+      // Undo/Redo go to the renderer: the editor keeps its own history, which native undo knows nothing of.
+      label: 'Edit',
+      submenu: [
+        { label: 'Undo', accelerator: 'CmdOrCtrl+Z', click: send('undo') },
+        { label: 'Redo', accelerator: 'Shift+CmdOrCtrl+Z', click: send('redo') },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'pasteAndMatchStyle' },
+        { role: 'delete' },
+        { role: 'selectAll' },
+        { type: 'separator' },
+        { label: 'Speech', submenu: [{ role: 'startSpeaking' }, { role: 'stopSpeaking' }] },
+      ],
+    },
     {
       label: 'View',
       submenu: [

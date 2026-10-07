@@ -41,7 +41,11 @@ assert.strictEqual(byId(await until((d) => byId(d, 'a').flag === 'blue'), 'a').f
 ```
 
 - Drive the UI through real events where possible: `.click()`, `dispatchEvent(new KeyboardEvent('keydown',
-  { key, metaKey, bubbles: true }))`, and set textarea values followed by an `input` event.
+  { key, metaKey, bubbles: true }))`, and type into the editor with `document.execCommand('insertText', false, 'text')` (or set its `textContent`
+  followed by an `input` event); read the result from `editing.draft`.
+- Keys the browser handles itself (arrows, caret movement) need real input: `win.webContents.focus()`, then
+  `win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Down' })` (and `keyUp`). It bypasses the app menu,
+  so menu accelerators (⌘Z, ⌘N) are tested by sending their command: `win.webContents.send('command', 'undo')`.
 - Native menus and dialogs cannot be clicked from the renderer. Call the action they resolve to instead
   (e.g. `promptAction(p, 'move:p2')`), and do not add steps that open a `confirm` dialog — it would block the test.
 - A double-click is `new MouseEvent('click', { bubbles: true, detail: 2 })`.

@@ -19,7 +19,7 @@ DOM or CSS feature before writing code, and never add a package for something a 
   - `copy(text)` → clipboard
   - `confirm(message, detail, okLabel)` → native warning dialog, resolves `true` on OK
   - `menu(items)` → native popup menu, resolves the clicked item's `id` (or index), `-1` when dismissed
-  - `onCommand(fn)` → commands sent from the app menu (`'new-prompt'`, `'new-project'`, `'search'`)
+  - `onCommand(fn)` → commands sent from the app menu (`'new-prompt'`, `'new-project'`, `'search'`, `'undo'`, `'redo'`)
 - `renderer.js` — the entire UI in one file, sectioned with `// ---------- name ----------` comments.
 
 New IPC: add `ipcMain.handle` in `main.js`, expose it in `preload.js`, call `window.api.x()` in the renderer.
@@ -46,7 +46,7 @@ state = {
 }
 ```
 
-- UI-only state lives in module variables, not in `state`: `editing` (`{ id, draft, isNew, caret }`),
+- UI-only state lives in module variables, not in `state`: `editing` (`{ id, draft, isNew, caret, hist }`),
   `renaming` (project id), `query`.
 - IDs come from `uid()`. Timestamps are `Date.now()` numbers.
 - Changing the shape: increment `version`, migrate older files in the load IIFE (see the v1 → v2 sort),
@@ -79,10 +79,23 @@ Rules that follow from the full rebuild:
   `window.api.onCommand`; `⌘0`–`⌘9` live in the `document` keydown handler; editor keys in `editorKeys`.
   Document new shortcuts in the README table.
 
-## Markdown
+## Markdown and the editor
 
-`renderMarkdown` supports only fenced ```` ``` ```` blocks (with a language label and a copy button) and
-`` `inline code` ``. Keep it that small; prompts are pasted into agents as plain text.
+`renderMarkdown` supports fenced ```` ``` ```` blocks (with a language label and a copy button),
+`` `inline code` `` and `-` / `*` / `1.` / `1)` lists nested by indentation (2 spaces per level). Keep it small;
+prompts are pasted into agents as plain text.
+
+The editor is a `contenteditable="plaintext-only"` div that shows the markdown **source**, one `<div class="ln">` per
+line, decorated by `decorate(src)` (escaped text in spans). Its text (`readText(ed)`) always equals `editing.draft`;
+the stored format stays a plain markdown string. On `input` the changed lines are re-decorated (`paint`) and the
+selection is restored by plain-text offset (`selOf` / `setSel`); nothing is touched during IME composition.
+Rewriting the DOM breaks native undo, so the editor keeps its own stack in `editing.hist` (capped at 200 steps).
+Edit ▸ Undo / Redo (⌘Z / ⇧⌘Z) are therefore not native roles: they send the `'undo'` / `'redo'` command, which
+runs `undoRedo` in the editor and `document.execCommand` in any other field. Edits made by key handling (Enter, Tab,
+paste, cut) go through `applyEdit` as pure `(text, selection) → [text, selection]` functions such as `enterEdit` and
+`tabEdit` (and `backEdit`: Backspace after a marker outdents / removes it); list edits end with `renumber`, which keeps numbered siblings consecutive and never touches lines inside a ```` ``` ```` fence. Native edits (`sync`) and paste / cut (`replaceSel`) go through `relist`, which renumbers only when the edit changed the line count, so a retyped number sticks. List lines hang after their
+marker: the marker is plain inline monospace text (never `inline-block`, which breaks ↑/↓ columns) and the line gets
+a `.w<n>` class (marker length) that sets `padding-left` and a negative `text-indent`.
 
 ## Styling
 

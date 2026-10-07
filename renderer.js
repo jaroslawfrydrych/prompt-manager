@@ -20,7 +20,7 @@ const ICONS = {
 };
 
 let state = { version: 2, projects: [], prompts: [], view: 'all', tab: 'pending' };
-let editing = null; // { id, draft, isNew }
+let editing = null; // { id, draft, isNew, caret, hist }
 let renaming = null; // project id
 let query = '';
 
@@ -44,10 +44,51 @@ window.addEventListener('beforeunload', () => {
   flush();
 });
 
-// ---------- markdown: ``` blocks and `inline` only ----------
+// ---------- markdown: ``` blocks, `inline` code and lists ----------
+
+const LIST = /^( *)([-*]|\d+[.)]) /; // indent, marker
+const FENCE = /^ *```/;
 
 function inline(text) {
   return esc(text).replace(/`([^`\n]+)`/g, '<code>$1</code>');
+}
+
+// Consecutive list lines become nested lists; everything else stays inline text.
+function blocks(text) {
+  const lines = text.split('\n');
+  let out = '';
+  for (let i = 0; i < lines.length;) {
+    const from = i;
+    const isList = LIST.test(lines[i]);
+    while (i < lines.length && LIST.test(lines[i]) === isList) i++;
+    // A newline right before a block element does not render, so text followed by a list
+    // gets one more to keep the user's blank line (the one ending the text is dropped).
+    out += isList ? listHtml(lines.slice(from, i)) : inline(lines.slice(from, i).join('\n') + (i < lines.length ? '\n' : ''));
+  }
+  return out;
+}
+
+// Nesting follows indent length, so any deeper indent nests (not only multiples of two).
+function listHtml(lines) {
+  const open = []; // { indent, tag }, innermost last
+  const top = () => open[open.length - 1];
+  let html = '';
+  for (const line of lines) {
+    const [all, ind, mk] = LIST.exec(line);
+    const tag = /\d/.test(mk) ? 'ol' : 'ul';
+    while (open.length && (ind.length < top().indent || (ind.length === top().indent && top().tag !== tag))) {
+      html += `</li></${open.pop().tag}>`;
+    }
+    if (open.length && top().indent === ind.length) html += '</li>';
+    else {
+      const n = parseInt(mk, 10);
+      html += tag === 'ol' && n !== 1 ? `<ol start="${n}">` : `<${tag}>`;
+      open.push({ indent: ind.length, tag });
+    }
+    html += `<li>${inline(line.slice(all.length))}`;
+  }
+  while (open.length) html += `</li></${open.pop().tag}>`;
+  return html;
 }
 
 function renderMarkdown(src) {
@@ -56,14 +97,333 @@ function renderMarkdown(src) {
   let last = 0;
   let m;
   while ((m = re.exec(src))) {
-    out += inline(src.slice(last, m.index).replace(/\n+$/, ''));
+    out += blocks(src.slice(last, m.index).replace(/\n+$/, ''));
     out += `<div class="codeblock"><div class="cb-head"><span>${esc(m[1] || 'code')}</span>`
       + `<button class="cb-copy" title="Copy code">${ICONS.copy}</button></div>`
       + `<pre><code>${esc(m[2])}</code></pre></div>`;
     last = re.lastIndex;
     while (src[last] === '\n') last++;
   }
-  return out + inline(src.slice(last));
+  return out + blocks(src.slice(last));
+}
+
+// ---------- live editor ----------
+// A contenteditable showing the markdown source, one <div class="ln"> per line, decorated with spans.
+// Its text (readText) always equals editing.draft; every input re-decorates the changed lines and
+// restores the selection by plain-text offset. Rewriting the DOM breaks native undo, so the editor
+// keeps its own undo stack in editing.hist.
+
+function decorate(src) {
+  if (!src) return ''; // truly empty, so the :empty placeholder shows
+  let fence = false;
+  return src.split('\n').map((line) => {
+    const m = !fence && LIST.exec(line);
+    if (FENCE.test(line)) fence = !fence;
+    if (!m) return `<div class="ln">${line ? esc(line) : '<br>'}</div>`;
+    // w<n>: marker width in (monospace) characters, for the hanging indent in CSS.
+    return `<div class="ln li w${Math.min(m[0].length, 20)}"><span class="mk">${esc(m[0])}</span>${esc(line.slice(m[0].length))}</div>`;
+  }).join('');
+}
+
+// Text of whatever DOM native editing left: blocks are lines, <br> is a newline,
+// except the placeholder <br> that ends a block.
+function readText(node) {
+  let s = '';
+  for (const c of node.childNodes) {
+    if (c.nodeType === Node.TEXT_NODE) s += c.data;
+    else if (c.nodeName === 'BR') s += '\n';
+    else if (c.nodeName === 'DIV' || c.nodeName === 'P') s += `${s && !s.endsWith('\n') ? '\n' : ''}${readText(c)}\n`;
+    else s += readText(c);
+  }
+  return s.replace(/\n$/, '');
+}
+
+// Replaces only the lines whose decorated DOM differs, so untouched lines keep their
+// nodes (and spelling underlines). Returns true when anything changed.
+function paint(ed, text) {
+  const t = document.createElement('template');
+  t.innerHTML = decorate(text);
+  const next = [...t.content.childNodes];
+  const old = [...ed.childNodes];
+  let changed = false;
+  next.forEach((n, i) => {
+    if (old[i] && old[i].isEqualNode(n)) return;
+    changed = true;
+    if (old[i]) old[i].replaceWith(n); else ed.append(n);
+  });
+  old.slice(next.length).forEach((n) => { n.remove(); changed = true; });
+  return changed;
+}
+
+// Selection as plain-text offsets ({ start, end }), or null when it is outside the editor.
+function selOf(ed) {
+  const s = getSelection();
+  const r = s.rangeCount && s.getRangeAt(0);
+  if (!r || !ed.contains(r.startContainer) || !ed.contains(r.endContainer)) return null;
+  // Clone everything before the point and mark the point with a sentinel, so a <br> right
+  // before the caret still counts as a newline (readText drops a block's trailing <br>).
+  const at = (node, off) => {
+    const x = document.createRange();
+    x.setStart(ed, 0);
+    x.setEnd(node, off);
+    const d = document.createElement('div');
+    d.append(x.cloneContents());
+    let el = d; // the clone of the point's container is the last child at each level
+    for (let n = node.nodeType === Node.TEXT_NODE ? node.parentNode : node; n !== ed; n = n.parentNode) el = el.lastChild;
+    el.append('\u0000');
+    return readText(d).indexOf('\u0000');
+  };
+  const start = at(r.startContainer, r.startOffset);
+  return { start, end: r.collapsed ? start : at(r.endContainer, r.endOffset) };
+}
+
+// DOM point for a text offset in the decorated editor. At a span boundary it prefers the start
+// of the next node, so typing after a list marker lands in the text, not in the marker.
+function pointAt(ed, n) {
+  for (const ln of ed.children) {
+    const len = ln.textContent.length;
+    if (n <= len) {
+      let at = [ln, 0];
+      const w = document.createTreeWalker(ln, NodeFilter.SHOW_TEXT);
+      for (let t; (t = w.nextNode()); n -= t.length) {
+        at = [t, Math.min(n, t.length)];
+        if (n < t.length) break;
+      }
+      return at;
+    }
+    n -= len + 1;
+  }
+  return [ed, ed.childNodes.length];
+}
+
+function setSel(ed, { start, end }) {
+  const r = document.createRange();
+  r.setStart(...pointAt(ed, start));
+  r.setEnd(...pointAt(ed, end));
+  const s = getSelection();
+  s.removeAllRanges();
+  s.addRange(r);
+}
+
+// Undo history: snapshots of { text, sel }. Typing (same input kind, caret where the last step
+// left it, under 1 s apart) is coalesced into one step, like macOS.
+function record(text, sel, kind, before) {
+  const h = editing.hist;
+  const cur = h.stack[h.i];
+  if (text === cur.text) return;
+  h.stack.length = h.i + 1;
+  const sameSpot = before && before.start === cur.sel.start && before.end === cur.sel.end;
+  if (kind && kind === h.kind && sameSpot && h.i > 0 && Date.now() - h.at < 1000) h.stack[h.i] = { text, sel };
+  else {
+    if (before) cur.sel = before; // undo puts the caret back where this edit started
+    h.stack.push({ text, sel });
+    h.i++;
+    if (h.stack.length > 200) { h.stack.shift(); h.i--; }
+  }
+  Object.assign(h, { kind, at: Date.now() });
+}
+
+function show(ed, text, sel) {
+  editing.draft = text;
+  editing.caret = sel.start;
+  paint(ed, text);
+  setSel(ed, sel);
+}
+
+// Edits made by our own key handling (Enter, Tab, paste, cut) are one undo step each.
+function applyEdit(ed, [text, sel]) {
+  record(text, sel, null, selOf(ed));
+  show(ed, text, sel);
+}
+
+function replaceSel(ed, str) {
+  const { start, end } = selOf(ed) || { start: editing.draft.length, end: editing.draft.length };
+  const pos = start + str.length;
+  applyEdit(ed, relist(editing.draft, editing.draft.slice(0, start) + str + editing.draft.slice(end), { start: pos, end: pos }));
+}
+
+const lineCount = (s) => s.split('\n').length;
+// An edit that adds or removes lines (deleting, cutting or pasting items) renumbers the list
+// around the caret so it has no gaps (code in fences is left alone). Edits within a line are left alone, so a typed number sticks.
+const relist = (old, text, sel) => (lineCount(old) === lineCount(text) ? [text, sel] : renumber(text, sel));
+
+function undoRedo(ed, dir) {
+  const h = editing.hist;
+  if (!h.stack[h.i + dir]) return;
+  h.i += dir;
+  h.kind = null;
+  show(ed, h.stack[h.i].text, h.stack[h.i].sel);
+}
+
+const inFence = (text, at) => (text.slice(0, at).match(/^ *```/gm) || []).length % 2 === 1;
+
+// Enter: a list item continues the list (next number for numbered ones); an empty item ends it.
+function enterEdit(text, { start, end }, plain) {
+  text = text.slice(0, start) + text.slice(end);
+  const ls = text.lastIndexOf('\n', start - 1) + 1;
+  const le = text.indexOf('\n', start) < 0 ? text.length : text.indexOf('\n', start);
+  const m = !plain && !inFence(text, ls) && LIST.exec(text.slice(ls, le));
+  let ins = '\n';
+  if (m && start >= ls + m[0].length) {
+    if (!text.slice(ls + m[0].length, le).trim()) {
+      // An empty nested item moves up a level (like Notes); an empty top-level one ends the list,
+      // and numbered items after it start a new list at 1.
+      if (m[1]) return tabEdit(text, { start, end: start }, true);
+      return [restart(text.slice(0, ls), text.slice(le)), { start: ls, end: ls }];
+    }
+    const n = parseInt(m[2], 10);
+    ins += m[1] + (Number.isNaN(n) ? m[2] : `${n + 1}${m[2].slice(-1)}`) + ' ';
+    const pos = start + ins.length;
+    return renumber(text.slice(0, start) + ins + text.slice(start), { start: pos, end: pos });
+  }
+  const pos = start + ins.length;
+  return [text.slice(0, start) + ins + text.slice(start), { start: pos, end: pos }];
+}
+
+// Joins head + rest, restarting numbered items at the start of rest (top level) at 1.
+function restart(head, rest) {
+  const r = rest.replace(/^\n\d+(?=[.)] )/, '\n1');
+  return r === rest ? head + rest : renumber(head + r, { start: head.length + 1, end: head.length + 1 })[0];
+}
+
+// Backspace right after a list marker (like Notes): a nested item moves up a level, a top-level
+// one loses its marker and numbered items after it start a new list at 1. null: browser handles it.
+function backEdit(text, { start, end }) {
+  const ls = text.lastIndexOf('\n', start - 1) + 1;
+  const m = start === end && !inFence(text, ls) && LIST.exec(text.slice(ls));
+  if (!m || start !== ls + m[0].length) return null;
+  if (m[1]) return tabEdit(text, { start, end }, true);
+  const le = text.indexOf('\n', start) < 0 ? text.length : text.indexOf('\n', start);
+  return [restart(text.slice(0, ls) + text.slice(start, le), text.slice(le)), { start: ls, end: ls }];
+}
+
+// Numbered items in the list block around the caret continue from their first sibling's number,
+// so an inserted, nested or outdented item leaves no duplicates or gaps. A first item keeps its number.
+// Lines inside fenced code blocks are code, never touched.
+function renumber(text, { start, end }) {
+  const lines = text.split('\n');
+  const row = text.slice(0, start).split('\n').length - 1;
+  let a = row;
+  let b = text.slice(0, end).split('\n').length - 1;
+  while (a > 0 && LIST.test(lines[a - 1])) a--;
+  while (b < lines.length - 1 && LIST.test(lines[b + 1])) b++;
+  const prev = []; // last number seen per indent, for the siblings that follow
+  let off = 0; // offset of the current line in the old text
+  let ds = 0;
+  let de = 0;
+  let fenced = false;
+  lines.forEach((line, i) => {
+    if (/^ *```/.test(line)) fenced = !fenced;
+    const m = !fenced && i >= a && i <= b && LIST.exec(line);
+    if (m) {
+      const d = m[1].length;
+      prev.length = Math.min(prev.length, d + 1); // deeper levels end here
+      if (/\d/.test(m[2])) {
+        const n = prev[d] != null ? prev[d] + 1 : parseInt(m[2], 10);
+        prev[d] = n;
+        const mk = `${m[1]}${n}${m[2].slice(-1)} `;
+        const delta = mk.length - m[0].length;
+        // Positions after the marker move with it; the caret is never left inside the number.
+        if (start >= off + m[0].length) ds += delta;
+        if (end >= off + m[0].length) de += delta;
+        lines[i] = mk + line.slice(m[0].length);
+      } else prev[d] = null;
+    } else prev.length = 0; // a non-list line ends the list
+    off += line.length + 1;
+  });
+  return [lines.join('\n'), { start: start + ds, end: end + de }];
+}
+
+// Number for a numbered item at this indent: continues the previous sibling, else starts at 1.
+function nextNumber(lines, i, indent) {
+  for (let j = i - 1; j >= 0; j--) {
+    const m = LIST.exec(lines[j]);
+    if (!m || m[1].length < indent) return 1;
+    if (m[1].length === indent) return /\d/.test(m[2]) ? parseInt(m[2], 10) + 1 : 1;
+  }
+  return 1;
+}
+
+// Tab / Shift+Tab on list lines indents / outdents them one level (two spaces).
+// Elsewhere Tab inserts two spaces and Shift+Tab is left to the browser (returns null).
+function tabEdit(text, { start, end }, outdent) {
+  const lines = text.split('\n');
+  const first = text.slice(0, start).split('\n').length - 1;
+  const last = text.slice(0, end).split('\n').length - 1;
+  if (!LIST.test(lines[first]) || inFence(text, start)) {
+    if (outdent) return null;
+    return [text.slice(0, start) + '  ' + text.slice(end), { start: start + 2, end: start + 2 }];
+  }
+  const ls = text.lastIndexOf('\n', start - 1) + 1;
+  let firstDelta = 0;
+  let delta = 0;
+  for (let i = first; i <= last; i++) {
+    const m = LIST.exec(lines[i]);
+    if (!m) continue;
+    const ind = outdent ? m[1].slice(2) : `${m[1]}  `;
+    const mk = /\d/.test(m[2]) ? nextNumber(lines, i, ind.length) + m[2].slice(-1) : m[2];
+    const line = `${ind}${mk} ${lines[i].slice(m[0].length)}`;
+    if (i === first) firstDelta = line.length - lines[i].length;
+    delta += line.length - lines[i].length;
+    lines[i] = line;
+  }
+  return renumber(lines.join('\n'), { start: Math.max(ls, start + firstDelta), end: Math.max(ls, end + delta) });
+}
+
+function mountEditor(ed) {
+  const pos = editing.caret == null ? editing.draft.length : editing.caret;
+  editing.hist = editing.hist || { stack: [{ text: editing.draft, sel: { start: pos, end: pos } }], i: 0 };
+  paint(ed, editing.draft);
+  ed.focus();
+  setSel(ed, { start: pos, end: pos });
+
+  let before = null; // selection before the current native edit
+  let composing = false;
+  const sync = (kind) => {
+    const read = readText(ed);
+    const [text, sel] = relist(editing.draft, read, selOf(ed) || { start: read.length, end: read.length });
+    record(text, sel, kind, before);
+    editing.draft = text;
+    editing.caret = sel.start;
+    if (paint(ed, text) || text !== read) setSel(ed, sel);
+  };
+  ed.addEventListener('beforeinput', (e) => {
+    // The browser's own undo knows nothing of our re-decorated DOM. The Edit menu sends an 'undo'
+    // command instead, so this is only a safety net for any other path to native undo.
+    if (e.inputType === 'historyUndo' || e.inputType === 'historyRedo') {
+      e.preventDefault();
+      undoRedo(ed, e.inputType === 'historyUndo' ? -1 : 1);
+      return;
+    }
+    if (!composing) before = selOf(ed);
+  });
+  // Leave the DOM alone while an IME (dead keys, accents) composes; re-decorate when it commits.
+  ed.addEventListener('compositionstart', () => { composing = true; before = selOf(ed); });
+  ed.addEventListener('compositionend', () => { composing = false; sync('insertText'); });
+  ed.addEventListener('input', (e) => {
+    if (composing || e.isComposing) editing.draft = readText(ed);
+    else sync(e.inputType);
+  });
+  ed.addEventListener('paste', (e) => {
+    e.preventDefault();
+    const t = e.clipboardData.getData('text/plain');
+    if (t) replaceSel(ed, t.replace(/\r\n?/g, '\n')); // no text (e.g. an image): ignore, keep the selection
+  });
+  // Copy the exact markdown source rather than the browser's serialisation of the line divs.
+  const copy = (e) => {
+    const s = selOf(ed);
+    if (!s || s.start === s.end) return;
+    e.preventDefault();
+    e.clipboardData.setData('text/plain', editing.draft.slice(s.start, s.end));
+    if (e.type === 'cut') replaceSel(ed, '');
+  };
+  ed.addEventListener('copy', copy);
+  ed.addEventListener('cut', copy);
+  ed.addEventListener('keydown', editorKeys);
+  // Switching to another app blurs too; keep editing then, the editor refocuses on return.
+  // A re-render removes the editor and blurs it as well; that edit was already handled
+  // (e.g. newPrompt committed it), so committing here would discard the next editor.
+  ed.addEventListener('blur', () => setTimeout(() => { if (document.hasFocus() && ed.isConnected) commitEdit(true); }, 0));
 }
 
 // ---------- time ----------
@@ -162,8 +522,8 @@ function cardHtml(p) {
   const proj = project(p.projectId);
   const doneLabel = p.doneAt ? `done ${ago(p.doneAt)}` : '';
   const body = isEditing
-    ? `<textarea class="editor" placeholder="What are we working on?"></textarea>
-       <div class="edit-hint"><kbd>⌘</kbd><kbd>↩</kbd> save &nbsp;·&nbsp; <kbd>esc</kbd> cancel &nbsp;·&nbsp; <code>\`code\`</code> &nbsp; <code>\`\`\`block\`\`\`</code></div>`
+    ? `<div class="editor" contenteditable="plaintext-only" spellcheck="true" role="textbox" aria-multiline="true" data-placeholder="What are we working on?"></div>
+       <div class="edit-hint"><kbd>⌘</kbd><kbd>↩</kbd> save &nbsp;·&nbsp; <kbd>esc</kbd> cancel &nbsp;·&nbsp; <code>\`code\`</code> &nbsp; <code>\`\`\`block\`\`\`</code> &nbsp; <code>- list</code> &nbsp; <code>1. list</code> &nbsp; <kbd>⇥</kbd> nest</div>`
     : `<div class="body">${renderMarkdown(p.text)}</div>`;
 
   const draggable = !isEditing && !p.doneAt ? ' draggable="true"' : '';
@@ -207,25 +567,8 @@ function renderList() {
     ? `<div class="cards">${items.map(cardHtml).join('')}</div>`
     : emptyHtml();
 
-  const ta = $('#list textarea.editor');
-  if (ta) {
-    ta.value = editing.draft;
-    autosize(ta);
-    ta.focus();
-    const pos = editing.caret == null ? ta.value.length : editing.caret;
-    ta.setSelectionRange(pos, pos);
-    ta.addEventListener('input', () => { editing.draft = ta.value; editing.caret = ta.selectionStart; autosize(ta); });
-    ta.addEventListener('keydown', editorKeys);
-    // Switching to another app blurs too; keep editing then, the textarea refocuses on return.
-    // A re-render removes the textarea and blurs it as well; that edit was already handled
-    // (e.g. newPrompt committed it), so committing here would discard the next editor.
-    ta.addEventListener('blur', () => setTimeout(() => { if (document.hasFocus() && ta.isConnected) commitEdit(true); }, 0));
-  }
-}
-
-function autosize(ta) {
-  ta.style.height = 'auto';
-  ta.style.height = `${ta.scrollHeight}px`;
+  const ed = $('#list .editor');
+  if (ed) mountEditor(ed);
 }
 
 function renderHeader() {
@@ -306,12 +649,20 @@ function commitEdit(rerender = true, cancel = false) {
 }
 
 function editorKeys(e) {
-  const ta = e.target;
+  const ed = e.currentTarget;
+  if (e.isComposing || e.keyCode === 229) return; // keys belong to the IME while it composes
+  const sel = () => selOf(ed) || { start: editing.draft.length, end: editing.draft.length };
   if (e.key === 'Escape') { e.preventDefault(); commitEdit(true, true); }
   else if (e.key === 'Enter' && e.metaKey) { e.preventDefault(); commitEdit(true); }
-  else if (e.key === 'Tab' && !e.shiftKey) {
-    e.preventDefault();
-    document.execCommand('insertText', false, '  ');
+  else if (e.key === 'Enter' && !e.altKey && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault(); // ⇧↩ is a plain newline that does not continue a list
+    applyEdit(ed, enterEdit(editing.draft, sel(), e.shiftKey));
+  } else if (e.key === 'Tab' && !e.altKey && !e.ctrlKey && !e.metaKey) {
+    const r = tabEdit(editing.draft, sel(), e.shiftKey);
+    if (r) { e.preventDefault(); applyEdit(ed, r); }
+  } else if (e.key === 'Backspace' && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+    const r = backEdit(editing.draft, sel());
+    if (r) { e.preventDefault(); applyEdit(ed, r); }
   }
 }
 
@@ -460,7 +811,8 @@ $('#nav').addEventListener('drop', (e) => {
 
 $('#list').addEventListener('dragstart', (e) => {
   const card = e.target.closest('.card');
-  if (card) dragStart(e, 'prompt', card, card.dataset.id);
+  // Text dragged inside the open editor is the editor's own drag, not a card move.
+  if (card && !(editing && card.dataset.id === editing.id)) dragStart(e, 'prompt', card, card.dataset.id);
 });
 $('#list').addEventListener('dragover', (e) => {
   const card = e.target.closest('.card');
@@ -541,7 +893,7 @@ $('#list').addEventListener('contextmenu', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
-  const typing = /INPUT|TEXTAREA/.test(document.activeElement.tagName);
+  const typing = /INPUT|TEXTAREA/.test(document.activeElement.tagName) || document.activeElement.isContentEditable;
   if (!e.metaKey || typing && !/^[0-9]$/.test(e.key)) return;
   if (e.key === '0') { e.preventDefault(); selectView('all'); }
   if (/^[1-9]$/.test(e.key)) {
@@ -554,6 +906,12 @@ window.api.onCommand((cmd) => {
   if (cmd === 'new-prompt') newPrompt();
   if (cmd === 'new-project') newProject();
   if (cmd === 'search') { $('#search').focus(); $('#search').select(); }
+  // Edit ▸ Undo / Redo (⌘Z / ⇧⌘Z): the editor has its own history, other fields use the browser's.
+  if (cmd === 'undo' || cmd === 'redo') {
+    const ed = document.activeElement;
+    if (editing && ed.classList.contains('editor')) undoRedo(ed, cmd === 'undo' ? -1 : 1);
+    else document.execCommand(cmd);
+  }
 });
 
 // Keep "x minutes ago" labels fresh without re-rendering (which would disturb an open editor).
