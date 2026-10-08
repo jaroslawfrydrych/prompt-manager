@@ -901,7 +901,7 @@ function cardHtml(p) {
   const doneLabel = p.doneAt ? `done ${ago(p.doneAt)}` : '';
   const body = isEditing
     ? `<div class="editor" contenteditable="plaintext-only" spellcheck="true" role="textbox" aria-multiline="true" data-placeholder="What are we working on?"></div>
-       <div class="edit-hint"><span>saved as you type</span> · <span><kbd>⌘</kbd><kbd>↩</kbd> done</span> · <span><kbd>esc</kbd> revert</span> · <span><code>\`code\`</code> <code>\`\`\`block\`\`\`</code></span> <span><code>- list</code> <code>1. list</code> <kbd>⇥</kbd> nest</span> · <span><kbd>⌘B</kbd> <kbd>⌘I</kbd> <kbd>⌘U</kbd> format</span></div>`
+       <div class="edit-hint"><span>saved as you type</span> · <span><kbd>⌘</kbd><kbd>↩</kbd> done</span> · <span><kbd>esc</kbd> close</span> · <span><code>\`code\`</code> <code>\`\`\`block\`\`\`</code></span> <span><code>- list</code> <code>1. list</code> <kbd>⇥</kbd> nest</span> · <span><kbd>⌘B</kbd> <kbd>⌘I</kbd> <kbd>⌘U</kbd> format</span></div>`
     : `<div class="body">${renderMarkdown(p.text)}</div>`;
 
   const draggable = !isEditing && !p.doneAt ? ' draggable="true"' : '';
@@ -1011,14 +1011,13 @@ function startEdit(id) {
   render();
 }
 
-function commitEdit(rerender = true, cancel = false) {
+function commitEdit(rerender = true) {
   if (!editing) return;
-  if (!cancel) saveDraft(); // catches a draft typed mid-IME composition
-  const { id, orig, isNew } = editing;
+  saveDraft(); // catches a draft typed mid-IME composition
+  const { id, isNew } = editing;
   editing = null;
   const p = state.prompts.find((x) => x.id === id);
   if (p) {
-    if (cancel) p.text = orig;
     // An empty new prompt is discarded.
     if (isNew && !p.text.trim()) state.prompts = state.prompts.filter((x) => x.id !== id);
   }
@@ -1030,8 +1029,7 @@ function editorKeys(e) {
   const ed = e.currentTarget;
   if (e.isComposing || e.keyCode === 229) return; // keys belong to the IME while it composes
   const sel = () => selOf(ed) || { start: editing.draft.length, end: editing.draft.length };
-  if (e.key === 'Escape') { e.preventDefault(); commitEdit(true, true); }
-  else if (e.key === 'Enter' && e.metaKey) { e.preventDefault(); commitEdit(true); }
+  if (e.key === 'Escape' || e.key === 'Enter' && e.metaKey) { e.preventDefault(); commitEdit(true); }
   else if (e.key === 'Enter' && !e.altKey && !e.ctrlKey && !e.metaKey) {
     e.preventDefault(); // ⇧↩ is a plain newline that does not continue a list
     applyEdit(ed, enterEdit(editing.draft, sel(), e.shiftKey));

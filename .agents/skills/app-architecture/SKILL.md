@@ -64,7 +64,7 @@ state = {
 }
 ```
 
-- UI-only state lives in module variables, not in `state`: `editing` (`{ id, draft, orig, isNew, caret, hist }`; every edit is saved to the prompt as you type via `saveDraft`, `orig` is what Esc restores),
+- UI-only state lives in module variables, not in `state`: `editing` (`{ id, draft, orig, isNew, caret, hist }`; every edit is saved to the prompt as you type via `saveDraft`, `orig` is what an emptied existing prompt falls back to; Esc and ⌘↩ both just close the editor),
   `renaming` (project id), `query`.
 - IDs come from `uid()`. Timestamps are `Date.now()` numbers.
 - Changing the shape: increment `version`, migrate older files in the load IIFE (see the v1 → v2 sort),

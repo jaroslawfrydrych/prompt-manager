@@ -560,8 +560,8 @@ app.on('browser-window-created', (_e, win) => {
       assert.ok(!await js(`$('#update').disabled`), 'a refused install must re-enable the button');
       assert.ok((await js(`$('#update').textContent`)).includes('Update available'));
 
-      // edits save as you type; Copy while editing copies the current text and keeps the editor open; Esc reverts
-      const before = await js(`commitEdit(false); selectView('all'); state.tab = 'pending'; render(); startEdit('a'); state.prompts.find((q) => q.id === 'a').text`);
+      // edits save as you type; Copy while editing copies the current text and keeps the editor open; Esc keeps the text and closes
+      await js(`commitEdit(false); selectView('all'); state.tab = 'pending'; render(); startEdit('a')`);
       await js(`const t = document.querySelector('.editor'); t.textContent = 'live \`draft\`  '; t.dispatchEvent(new Event('input'))`);
       assert.strictEqual(byId(await until((d) => byId(d, 'a').text === 'live `draft`'), 'a').text, 'live `draft`');
       assert.ok(await js(`const b = ${card('a')}.querySelector('[data-act=copy]'); const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
@@ -570,7 +570,9 @@ app.on('browser-window-created', (_e, win) => {
       assert.strictEqual(await clipboard.readText(), 'live `draft`');
       assert.ok(await js(`editing && editing.id === 'a' && !!document.querySelector('.card.editing .editor')`));
       await js(`document.querySelector('.editor').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
-      assert.strictEqual(byId(await until((d) => byId(d, 'a').text === before), 'a').text, before);
+      await wait(300);
+      assert.ok(await js(`!editing && !document.querySelector('.editor')`));
+      assert.strictEqual(byId(read(), 'a').text, 'live `draft`');
 
       console.log('SMOKE OK');
       app.exit(0);
