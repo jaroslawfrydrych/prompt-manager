@@ -24,8 +24,12 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const read = () => JSON.parse(fs.readFileSync(file, 'utf8'));
 // Saves are debounced and timers in a background window are throttled, so poll the file.
 async function until(check) {
-  for (let i = 0; i < 50 && !check(read()); i++) await wait(100);
-  return read();
+  for (let i = 0; i < 50; i++) {
+    const d = read();
+    if (check(d)) return d;
+    await wait(100);
+  }
+  throw new Error(`until timed out: ${check}`);
 }
 
 app.on('browser-window-created', (_e, win) => {
@@ -35,6 +39,14 @@ app.on('browser-window-created', (_e, win) => {
   win.webContents.on('console-message', (e) => console.log('renderer:', e.message));
   win.webContents.once('did-finish-load', async () => {
     const js = (c) => win.webContents.executeJavaScript(c.includes(';') ? `{ ${c} }` : c);
+    // renderer-side until(): polls a JS expression (up to 5 s) until it is truthy
+    const poll = async (c) => {
+      for (let i = 0; i < 50; i++) {
+        if (await js(c)) return;
+        await wait(100);
+      }
+      throw new Error(`poll timed out: ${c}`);
+    };
     try {
       await wait(500);
 
@@ -255,11 +267,11 @@ app.on('browser-window-created', (_e, win) => {
       await js(`newPrompt(); document.execCommand('insertText', false, 'abcdefgh\\n- one\\n  - two two\\n- three\\nxyz'); setSel(${ed}, { start: 8, end: 8 })`);
       win.webContents.focus();
       const downs = [];
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0, prev = 8; i < 3; i++) {
         win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Down' });
         win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Down' });
-        await wait(100);
-        downs.push(await js(`selOf(${ed}).start`));
+        await poll(`selOf(${ed}).start !== ${prev}`); // real keys are async: wait for the caret to move
+        downs.push(prev = await js(`selOf(${ed}).start`));
       }
       assert.ok(downs[1] > 19 && downs[2] > 29, `caret after ↓: ${downs}`);
       // native undo still works in other fields (Edit ▸ Undo falls back to the browser's)
@@ -592,7 +604,7 @@ app.on('browser-window-created', (_e, win) => {
         win.webContents.sendInputEvent({ type: 'mouseDown', x: pt[0], y: pt[1], button: 'left', clickCount: 1 });
         await wait(gap);
         win.webContents.sendInputEvent({ type: 'mouseUp', x: pt[0], y: pt[1], button: 'left', clickCount: 1 });
-        await wait(300);
+        await poll(`editing?.id === ${JSON.stringify(id)}`);
         assert.deepStrictEqual(await js(`[editing && editing.id, editing.caret, selOf(${ed}).start, editing.hist.stack[editing.hist.i].sel.start]`), [id, ...Array(3).fill(words.indexOf('four') + 1)]);
         await js(`commitEdit(true)`);
       };
@@ -609,22 +621,26 @@ app.on('browser-window-created', (_e, win) => {
         b.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: r.left + 10, clientY: r.top + 10 }));
         b.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: new DataTransfer() })); b.dispatchEvent(new DragEvent('dragend', { bubbles: true }))`);
       const search = await js(`const r = document.querySelector('#search').getBoundingClientRect(); [Math.round(r.left + 10), Math.round(r.top + r.height / 2)]`);
+      // flag set one macrotask after mouseup, i.e. after the app's own setTimeout(0) mouseup handler (a late startEdit) ran
+      await js(`window.upDone = false; document.addEventListener('mouseup', () => setTimeout(() => { window.upDone = true; }, 0), { once: true })`);
       win.webContents.focus();
       win.webContents.sendInputEvent({ type: 'mouseMove', x: search[0], y: search[1] });
       win.webContents.sendInputEvent({ type: 'mouseDown', x: search[0], y: search[1], button: 'left', clickCount: 1 });
       win.webContents.sendInputEvent({ type: 'mouseUp', x: search[0], y: search[1], button: 'left', clickCount: 1 });
-      await wait(300);
+      await poll(`upDone && document.activeElement.id === 'search'`);
       assert.deepStrictEqual(await js(`[editing, document.activeElement.id]`), [null, 'search']);
 
       // ⌘Z after closing the editor (nothing focused) reopens the last edited prompt and undoes there
       const textOf = async (id) => byId(read(), id).text;
       await js(`document.activeElement.blur(); state.prompts.forEach((p) => { if (p.id === 'a' || p.id === 'b') p.doneAt = null; }); selectView(state.prompts.find((p) => p.id === 'b').projectId)`);
-      const [ta, tb] = [await textOf('a'), await textOf('b')];
+      // from state, not the file: the last commitEdit's save may still be debounced
+      const [ta, tb] = await js(`['a', 'b'].map((id) => state.prompts.find((p) => p.id === id).text)`);
       await js(`startEdit('a'); setSel(${ed}, { start: 0, end: 0 })`);
       win.webContents.focus(); // real keys: execCommand fires no beforeinput, which undo uses to put the caret back
       for (const c of 'A1 ') win.webContents.sendInputEvent({ type: 'char', keyCode: c });
-      await key('Escape');
+      // real keys arrive on their own channel, so let them all land before Escape (a js() call) closes the editor
       await until((d) => byId(d, 'a').text === `A1 ${ta}`);
+      await key('Escape');
       await cmd('undo');
       assert.deepStrictEqual(await js(`[editing?.id, state.view, selOf(${ed}).start]`), ['a', byId(read(), 'a').projectId, 0]);
       await until((d) => byId(d, 'a').text === ta);
