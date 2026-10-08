@@ -20,7 +20,7 @@ const ICONS = {
 };
 
 let state = { version: 2, projects: [], prompts: [], view: 'all', tab: 'pending' };
-let editing = null; // { id, draft, orig, isNew, caret, hist }
+let editing = null; // { id, draft, orig, isNew, caret, hist, at }
 let renaming = null; // project id
 let query = '';
 
@@ -754,10 +754,20 @@ function checked(text, sel, kind, wrap) {
 }
 
 function mountEditor(ed) {
-  const pos = editing.caret == null ? editing.draft.length : editing.caret;
-  editing.hist = editing.hist || { stack: [{ text: editing.draft, sel: { start: pos, end: pos } }], i: 0 };
   paint(ed, editing.draft);
-  ed.focus();
+  // A click in the preview puts the caret at the same point in the editor: both lay the text out
+  // alike once the emphasis markers (the only visible ones) are hidden for the hit test.
+  const { at } = editing;
+  delete editing.at;
+  ed.classList.add('hit');
+  const b = ed.getBoundingClientRect();
+  const r = at && document.caretRangeFromPoint(b.left + at.dx, b.top + at.dy);
+  ed.focus({ preventScroll: !!at });
+  if (r) getSelection().setBaseAndExtent(r.startContainer, r.startOffset, r.startContainer, r.startOffset);
+  const hit = r && selOf(ed);
+  ed.classList.remove('hit');
+  const pos = editing.caret = hit ? hit.start : editing.caret == null ? editing.draft.length : editing.caret;
+  editing.hist = editing.hist || { stack: [{ text: editing.draft, sel: { start: pos, end: pos } }], i: 0 };
   setSel(ed, { start: pos, end: pos });
 
   let before = null; // selection before the current native edit
@@ -1009,11 +1019,11 @@ function newPrompt() {
   $('#list').scrollTop = 0;
 }
 
-function startEdit(id) {
+function startEdit(id, at) {
   if (editing && editing.id === id) return;
   if (editing) commitEdit(false);
   const p = state.prompts.find((x) => x.id === id);
-  editing = { id, draft: p.text, orig: p.text, isNew: false };
+  editing = { id, draft: p.text, orig: p.text, isNew: false, at };
   render();
 }
 
@@ -1150,6 +1160,7 @@ function moveItem(arr, id, targetId, side) {
 
 function dragStart(e, kind, el, id) {
   drag = { kind, id };
+  pressed = null; // a drag ends without mouseup, so the press must not open the editor on the next click elsewhere
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('text/plain', id);
   setTimeout(() => el.classList.add('dragging'), 0); // after the browser snapshots the drag image
@@ -1271,10 +1282,22 @@ $('#list').addEventListener('click', (e) => {
   }
 
   // Click on text enters edit mode, unless the user is selecting text.
-  if (p && e.target.closest('.body') && window.getSelection().isCollapsed) startEdit(p.id);
+  if (p && e.target.closest('.body') && window.getSelection().isCollapsed && !pressed) startEdit(p.id);
 });
-// Copy works while editing: keep the editor focused so its blur does not close it and re-render the button away.
-$('#list').addEventListener('mousedown', (e) => { if (e.target.closest('.card.editing [data-act=copy]')) e.preventDefault(); });
+// A real click opens the editor once the mouseup is done, at the point pressed. The press is kept relative to the text box:
+// closing another editor on mousedown re-renders the list (cards shift, and the click may not reach the card).
+let pressed = null; // { id, dx, dy }
+$('#list').addEventListener('mousedown', (e) => {
+  // Copy works while editing: keep the editor focused so its blur does not close it and re-render the button away.
+  if (e.target.closest('.card.editing [data-act=copy]')) e.preventDefault();
+  const body = e.button === 0 && !e.ctrlKey && !e.target.closest('[data-act]') && e.target.closest('.card:not(.editing) .body');
+  const r = body && body.getBoundingClientRect();
+  pressed = body && { id: body.closest('.card').dataset.id, dx: e.clientX - r.left, dy: e.clientY - r.top };
+});
+document.addEventListener('mouseup', () => setTimeout(() => {
+  if (pressed && window.getSelection().isCollapsed && state.prompts.some((x) => x.id === pressed.id)) startEdit(pressed.id, pressed);
+  pressed = null;
+}, 0));
 $('#list').addEventListener('contextmenu', (e) => {
   const card = e.target.closest('.card');
   const p = card && state.prompts.find((x) => x.id === card.dataset.id);

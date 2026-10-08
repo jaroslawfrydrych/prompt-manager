@@ -572,6 +572,41 @@ app.on('browser-window-created', (_e, win) => {
       assert.ok(await js(`!editing && !document.querySelector('.editor')`));
       assert.strictEqual(byId(read(), 'a').text, 'live `draft`');
 
+      // a click on a word in the preview puts the caret there (past emphasis markers and inline code), not at the end;
+      // also when another card's editor closes on mousedown and shifts the cards (mouse held down a moment)
+      const words = 'one **two** `x` three four five';
+      const low = await js(`const ids = [...document.querySelectorAll('.card')].map((c) => c.dataset.id); ids[ids.indexOf('a') + 1]`);
+      assert.ok(low, 'a card must follow a');
+      const clickFour = async (id, gap) => {
+        const pt = await js(`const n = [...${card(id)}.querySelector('.body').childNodes].pop(); const r = document.createRange(); r.setStart(n, n.data.indexOf('four') + 1); r.setEnd(n, n.data.indexOf('four') + 2);
+          const b = r.getBoundingClientRect(); [Math.round(b.left + 1), Math.round(b.top + b.height / 2)]`);
+        win.webContents.focus();
+        win.webContents.sendInputEvent({ type: 'mouseDown', x: pt[0], y: pt[1], button: 'left', clickCount: 1 });
+        await wait(gap);
+        win.webContents.sendInputEvent({ type: 'mouseUp', x: pt[0], y: pt[1], button: 'left', clickCount: 1 });
+        await wait(300);
+        assert.deepStrictEqual(await js(`[editing && editing.id, editing.caret, selOf(${ed}).start, editing.hist.stack[0].sel.start]`), [id, ...Array(3).fill(words.indexOf('four') + 1)]);
+        await js(`commitEdit(true)`);
+      };
+      await js(`for (const p of state.prompts) if (p.id === 'a' || p.id === ${JSON.stringify(low)}) p.text = ${JSON.stringify(words)}; render()`);
+      await clickFour('a', 0);
+      await js(`startEdit('a')`);
+      await clickFour(low, 150); // below the open editor
+      await js(`startEdit(${JSON.stringify(low)})`);
+      await clickFour('a', 150); // above the open editor
+
+      // a card drag ends without a mouseup (the browser fires dragstart/dragend instead), so the press on the card
+      // must not open its editor on the next click elsewhere
+      await js(`const b = ${card('a')}.querySelector('.body'), r = b.getBoundingClientRect();
+        b.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: r.left + 10, clientY: r.top + 10 }));
+        b.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: new DataTransfer() })); b.dispatchEvent(new DragEvent('dragend', { bubbles: true }))`);
+      const search = await js(`const r = document.querySelector('#search').getBoundingClientRect(); [Math.round(r.left + 10), Math.round(r.top + r.height / 2)]`);
+      win.webContents.focus();
+      win.webContents.sendInputEvent({ type: 'mouseDown', x: search[0], y: search[1], button: 'left', clickCount: 1 });
+      win.webContents.sendInputEvent({ type: 'mouseUp', x: search[0], y: search[1], button: 'left', clickCount: 1 });
+      await wait(300);
+      assert.deepStrictEqual(await js(`[editing, document.activeElement.id]`), [null, 'search']);
+
       console.log('SMOKE OK');
       app.exit(0);
     } catch (err) {

@@ -290,6 +290,7 @@ button.chip:hover { background: var(--fill-3); color: var(--text); }
 .editor code { padding-inline: 0; }
 .editor code .fm { letter-spacing: calc(5px - 1ch); }
 .editor code .fm, .editor .fence .fm { color: transparent; }
+.editor.hit :not(code, .fence) > .fm { display: none; } /* mountEditor's click hit test */
 /* Fenced code: each line of the block is a .cb line div, together drawn as the preview's .codeblock.
    The fence lines are its 10px top and bottom padding (``` transparent, the language dimmed and small). */
 .editor .cb { padding: 0 12px; border-block-width: 0; }
