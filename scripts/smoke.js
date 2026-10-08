@@ -192,6 +192,26 @@ app.on('browser-window-created', (_e, win) => {
       assert.strictEqual(await js(`${body}.querySelectorAll(':scope > ul > li').length`), 2);
       assert.strictEqual(await js(`${body}.querySelector(':scope > ol').getAttribute('start')`), '3');
       assert.strictEqual(await js(`${body}.querySelector('ol > li > ol > li').textContent`), 'd');
+      // lists look like the preview while editing: the bullet glyph (disc, circle, square by level) is drawn
+      // over the -/* marker, numbers stay as typed, and the text is still the raw markdown
+      await js(`newPrompt(); document.execCommand('insertText', false, '- a\\n  * b\\n    - c\\n1. d')`);
+      assert.deepStrictEqual(await js(`[...${ed}.querySelectorAll('.ln.li')].map((l) => l.className)`), [
+        'ln li ul l0 w2', 'ln li ul l1 w4', 'ln li ul l2 w6', 'ln li ol l0 w3',
+      ]);
+      assert.deepStrictEqual(
+        await js(`[...${ed}.querySelectorAll('.ln.li .mk')].map((m) => getComputedStyle(m, '::before').content)`),
+        ['"•"', '"◦"', '"▪"', 'none'],
+      );
+      // each level's bullet paints over its own -/*, one indent step further right, like the preview's nested
+      // <ul>: the declared left plus the text-indent the zero-width box inherits must be (w - 2) characters
+      const bullets = await js(`[...${ed}.querySelectorAll('.ul .mk')].map((m) => {
+        const s = getComputedStyle(m.parentElement);
+        return [parseFloat(getComputedStyle(m, '::before').left) + parseFloat(s.textIndent),
+          (parseFloat(s.getPropertyValue('--w')) - 2) * 0.6 * parseFloat(s.fontSize)];
+      })`);
+      assert.ok(bullets.every(([got, want]) => Math.abs(got - want) < 0.5), `bullet offsets: ${bullets}`);
+      assert.ok(await js(`readText(${ed}) === editing.draft && editing.draft === '- a\\n  * b\\n    - c\\n1. d'`));
+      await js(`${ed}.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
       // numbered items keep consecutive numbers through Enter, Tab and Shift+Tab (caret follows a wider number)
       const edit = async (f, t, s, ...a) => js(`${f}(${JSON.stringify(t)}, { start: ${s}, end: ${s} }${a.map((x) => `, ${x}`).join('')})`);
       assert.deepStrictEqual(await edit('enterEdit', '1. a\n2. b', 4), ['1. a\n2. \n3. b', { start: 8, end: 8 }]);
@@ -393,9 +413,9 @@ app.on('browser-window-created', (_e, win) => {
         'Files: README*, LICENSE*, CHANGELOG*', 'Branches feature*, fix* and release*', 'Match log*, tmp* and cache*',
         'Delete test*; keep main*', 'Prefixes (api*, web*) only', 'Tables user*, order*', 'The H*-algorithm and A*-search']) assert.strictEqual(await md(t), t);
 
-      // code live in the editor: inline code in the code face with dimmed backticks, not spell checked
+      // code live in the editor: inline code in the code face with invisible backticks, not spell checked
       await js(`newPrompt(); document.execCommand('insertText', false, 'say \`x *y*\` now')`);
-      assert.strictEqual(await js(`${ed}.querySelector('code').textContent`), 'x *y*');
+      assert.strictEqual(await js(`${ed}.querySelector('code').textContent`), '`x *y*`');
       assert.ok(/mono|menlo/i.test(await style('code', 'fontFamily')));
       assert.strictEqual(await js(`[...${ed}.querySelectorAll('.fm')].map((e) => e.textContent).join('')`), '``');
       assert.strictEqual(await js(`${ed}.querySelector('code').spellcheck`), false);
@@ -404,17 +424,16 @@ app.on('browser-window-created', (_e, win) => {
       const block = 'a\n```js\n- not list\n\t**no**  x\n```\nb';
       await js(`document.execCommand('selectAll'); document.execCommand('insertText', false, ${JSON.stringify(block)})`);
       assert.deepStrictEqual(await js(`[...${ed}.children].map((l) => l.className)`),
-        ['ln', 'ln cb cb-first', 'ln cb', 'ln cb', 'ln cb cb-last', 'ln']);
+        ['ln', 'ln cb fence cb-first', 'ln cb', 'ln cb', 'ln cb fence cb-last', 'ln']);
       assert.strictEqual(await js(`${ed}.querySelectorAll('.cb strong, .cb .mk, .cb.li').length`), 0);
       assert.strictEqual(await js(`${ed}.querySelectorAll('.cb')[2].textContent`), '\t**no**  x');
       assert.strictEqual(await js(`${ed}.querySelector('.cb').spellcheck`), false);
-      assert.strictEqual(await style('.cb-first', 'color'), await style('.fm', 'color'));
-      assert.notStrictEqual(await style('.cb + .cb', 'color'), await style('.fm', 'color'));
+      assert.notStrictEqual(await style('.cb + .cb', 'color'), await style('.cb-first', 'color'));
       assert.ok(/mono|menlo/i.test(await style('.cb', 'fontFamily')));
       assert.ok(await js(`readText(${ed}) === editing.draft`));
       // an unclosed fence is code to the end
       await js(`document.execCommand('selectAll'); document.execCommand('insertText', false, 'x\\n\`\`\`\\ny')`);
-      assert.deepStrictEqual(await js(`[...${ed}.children].map((l) => l.className)`), ['ln', 'ln cb cb-first', 'ln cb cb-last']);
+      assert.deepStrictEqual(await js(`[...${ed}.children].map((l) => l.className)`), ['ln', 'ln cb fence cb-first', 'ln cb cb-last']);
       // ``` + ↩ closes the fence (one undo step); ↩ in a block keeps the line's indentation
       await js(`document.execCommand('selectAll'); document.execCommand('insertText', false, 'run:\\n\`\`\`sh')`);
       await key('Enter');
@@ -448,7 +467,7 @@ app.on('browser-window-created', (_e, win) => {
       assert.strictEqual(await draft(), '```js\nx\n```\n');
       assert.strictEqual(await js(`selOf(${ed}).start`), 12);
       await type('after');
-      assert.deepStrictEqual(await js(`[...${ed}.children].map((l) => l.className)`), ['ln cb cb-first', 'ln cb', 'ln cb cb-last', 'ln']);
+      assert.deepStrictEqual(await js(`[...${ed}.children].map((l) => l.className)`), ['ln cb fence cb-first', 'ln cb', 'ln cb fence cb-last', 'ln']);
       await cmd('undo');
       await cmd('undo');
       assert.strictEqual(await draft(), '```js\nx\n```\n```');
@@ -465,6 +484,21 @@ app.on('browser-window-created', (_e, win) => {
       assert.strictEqual(await js(`const d = document.createElement('div'); d.innerHTML = decorate(${JSON.stringify(mid)}); d.querySelectorAll('.cb').length + ',' + d.querySelectorAll('.li').length`), '0,2');
       assert.strictEqual(await js(`const d = document.createElement('div'); d.innerHTML = renderMarkdown('x\\n  \`\`\`py\\n  a = 1\\n\`\`\`\\n\\ny');
         [d.firstChild.textContent, d.querySelector('.cb-head').textContent, d.querySelector('pre').textContent, d.lastChild.textContent].join('|')`), 'x|py|  a = 1|y');
+
+      // code markers are invisible in the editor but stay in the text
+      const src = 'Fix `x`\n```js\nlet a = 1;\n```';
+      assert.strictEqual(await js(`const d = document.createElement('div'); d.className = 'editor'; d.innerHTML = decorate(${JSON.stringify(src)});
+        document.body.append(d); const c = (s) => getComputedStyle(d.querySelector(s)).color;
+        const r = [readText(d), c('code .fm'), c('.fence.cb-first .fm'), c('.fence:not(.cb-first) .fm'), d.querySelector('code').textContent].join('|');
+        d.remove(); r`), `${src}|rgba(0, 0, 0, 0)|rgba(0, 0, 0, 0)|rgba(0, 0, 0, 0)|\`x\``);
+
+      // Copy strips the fences (language tag included) and the inline backticks, code content kept
+      assert.strictEqual(await js(`plainText(${JSON.stringify(src)})`), 'Fix x\nlet a = 1;');
+      assert.strictEqual(await js(`plainText('a \`b\` c\\n\`\`\`\\nkeep \`this\`\\n\`\`\`')`), 'a b c\nkeep `this`');
+      await js(`commitEdit(false); const p = state.prompts.find((q) => q.id === 'a'); p.doneAt = null; p.text = ${JSON.stringify(src)}; selectView(p.projectId); state.tab = 'pending'; render()`);
+      await js(`${card('a')}.querySelector('[data-act=copy]').click()`);
+      await wait(200);
+      assert.strictEqual(await clipboard.readText(), 'Fix x\nlet a = 1;');
 
       // app menu: Format sits after Edit, and no two items share an accelerator
       const items = (m) => m.items.flatMap((i) => [i, ...(i.submenu ? items(i.submenu) : [])]);
@@ -493,6 +527,27 @@ app.on('browser-window-created', (_e, win) => {
       assert.strictEqual(pickAsset(assets, 'arm64').name, 'Prompt-Manager-1.1.0-arm64.dmg');
       assert.strictEqual(pickAsset([{ name: 'notes.txt' }], 'arm64'), undefined);
       assert.deepStrictEqual(Menu.getApplicationMenu().items[0].submenu.items.slice(0, 2).map((i) => i.label), ['About Prompt Manager', 'Check for Updates…']);
+
+      // the sidebar Update button: hidden until the main process reports an update, accent coloured, installs on click
+      const upd = require('../updater.js');
+      assert.ok(await js(`document.querySelector('#update').hidden`), 'the update button must be hidden by default');
+      assert.strictEqual(
+        await js(`getComputedStyle($('#update')).backgroundColor`),
+        await js(`getComputedStyle(document.querySelector('.nav-icon')).color`), // All = var(--accent)
+      );
+      win.webContents.send('command', 'update-available');
+      await wait(200);
+      assert.ok(!await js(`document.querySelector('#update').hidden`));
+      assert.ok((await js(`$('#update').textContent`)).includes('Update available'));
+      let installed = false;
+      upd.installPending = async () => { installed = true; await wait(200); };
+      await js(`$('#update').click()`);
+      await wait(100);
+      assert.ok((await js(`$('#update').textContent`)).includes('Updating…'));
+      await wait(300);
+      assert.ok(installed, 'clicking the update button must run the install path');
+      assert.ok(!await js(`$('#update').disabled`), 'a refused install must re-enable the button');
+      assert.ok((await js(`$('#update').textContent`)).includes('Update available'));
 
       console.log('SMOKE OK');
       app.exit(0);

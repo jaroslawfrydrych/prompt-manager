@@ -34,7 +34,7 @@ Prompt Manager is where those prompts wait their turn.
   and ```` ``` ```` + `↩` adds the closing fence. `**bold**`, `*italic*` and `<u>underline</u>` show formatted as you type
   (the markers stay visible, dimmed); `⌘B` / `⌘I` / `⌘U` toggle them on the selection. Lists are formatted live while you type: `↩` continues a list
   (on an empty item it moves it up a level, or ends the list) and `⇥` / `⇧⇥` nest an item; numbers stay in sequence.
-- **Copy, paste, done.** One click copies the whole prompt, ready to paste into your agent. `⌥`-click also marks it as done.
+- **Copy, paste, done.** One click copies the whole prompt, ready to paste into your agent (code backticks and fences are left out). `⌥`-click also marks it as done.
   Done prompts move to a **Done** tab, where you can restore them.
 - **See what's getting old.** Every prompt shows when it was written. Pending prompts older than 3 days get an orange badge,
   because they may be outdated.
@@ -44,7 +44,8 @@ Prompt Manager is where those prompts wait their turn.
 - **Light & dark.** Follows the system appearance.
 - **Local only.** Everything is stored in one JSON file on your Mac. The only network requests are update checks
   to GitHub (once a day after launch, or **Prompt Manager ▸ Check for Updates…**).
-- **Updates in place.** When a new release is out, **Install and Relaunch** downloads it, verifies it and replaces the app.
+- **Updates in place.** When a new release is out, an **Update available** button appears at the bottom of the sidebar;
+  clicking it downloads the release, verifies it and replaces the app. Nothing is downloaded before that click.
   This needs the app in a folder you can write to (like **Applications**), not running from the disk image.
 
 ## Install

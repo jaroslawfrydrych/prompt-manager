@@ -122,6 +122,16 @@ kbd { font: 11px -apple-system, sans-serif; padding: 1px 5px; border-radius: 4px
   background: var(--field); border: 0; border-radius: 4px; outline: 3px solid rgba(10, 132, 255, 0.55);
 }
 .nav-empty { padding: 4px 8px; color: var(--text-3); }
+/* Sits after #nav (which flex-grows), so it stays in the bottom-left corner. */
+.update {
+  display: flex; align-items: center; gap: 8px; flex: none;
+  height: 28px; margin: 0 10px 12px; padding: 0 10px; border-radius: 6px;
+  background: var(--accent); color: #fff; font-weight: 500;
+}
+.update:hover:not(:disabled) { background: #2a93ff; }
+.update:focus-visible { outline: 3px solid rgba(10, 132, 255, 0.55); outline-offset: 2px; } /* offset: the ring would vanish on the accent fill */
+.update[hidden] { display: none; } /* flex would otherwise beat the attribute's UA display: none */
+.update:disabled { opacity: .6; }
 
 /* ---------- toolbar ---------- */
 
@@ -265,18 +275,31 @@ button.chip:hover { background: var(--fill-3); color: var(--text); }
    ↑/↓ keep their column; it is monospace (0.6em per character), so .w<n> (its length) gives its width. */
 .editor .li { padding-left: calc(var(--w) * 0.6em); text-indent: calc(var(--w) * -0.6em); }
 .editor .mk { font-family: var(--mono); white-space: pre; /* the space after the marker must not hang */ color: var(--text-2); }
+/* Bullets look like the preview's ::marker (disc, circle, square by level): the -/* keeps its box so the
+   hanging indent and ↑/↓ columns hold, and the glyph is drawn over it by a zero-width ::before. */
+.editor .ul .mk { color: transparent; }
+/* The marker char is the last two of the marker, so the glyph is shifted over it, past the indent:
+   (var(--w) - 2) characters, plus var(--w) to cancel the .li text-indent the zero-width box inherits. */
+.editor .ul .mk::before {
+  content: '•'; display: inline-block; width: 0;
+  position: relative; left: calc((2 * var(--w) - 2) * 0.6em); color: var(--text-2);
+}
+.editor .ul.l1 .mk::before { content: '◦'; }
+.editor .ul.l2 .mk::before { content: '▪'; }
 .editor .w2 { --w: 2; } .editor .w3 { --w: 3; } .editor .w4 { --w: 4; } .editor .w5 { --w: 5; } .editor .w6 { --w: 6; }
 .editor .w7 { --w: 7; } .editor .w8 { --w: 8; } .editor .w9 { --w: 9; } .editor .w10 { --w: 10; } .editor .w11 { --w: 11; }
 .editor .w12 { --w: 12; } .editor .w13 { --w: 13; } .editor .w14 { --w: 14; } .editor .w15 { --w: 15; } .editor .w16 { --w: 16; }
 .editor .w17 { --w: 17; } .editor .w18 { --w: 18; } .editor .w19 { --w: 19; } .editor .w20 { --w: 20; }
 /* Emphasis markers stay in the source text, dimmed and in the plain face. */
 .editor .fm { color: var(--text-3); font-weight: 400; font-style: normal; }
-/* Inline code looks like the preview's; its backticks are .fm, outside the pill. */
+/* Inline code looks like the preview's; its backticks stay in the text, transparent inside the pill
+   (so they read as its padding and the caret still steps through them). */
 .editor code {
   font: 12.5px var(--mono);
-  padding: 1.5px 2px; border-radius: 5px;
+  padding: 1.5px 0; border-radius: 5px;
   background: var(--inline-code-bg); color: var(--inline-code-fg);
 }
+.editor code .fm, .editor .fence .fm { color: transparent; }
 /* Fenced code: each line of the block is a .cb line div, together drawn as the preview's .codeblock.
    white-space stays pre-wrap (inherited), which keeps spaces and tabs and wraps long lines. */
 .editor .cb {
@@ -290,6 +313,8 @@ button.chip:hover { background: var(--fill-3); color: var(--text); }
   font-size: 10.5px; color: var(--text-3);
 }
 .editor .cb-first:not(.cb-last) { border-bottom-width: 1px; }
+/* The closer is the block's bottom edge: same metrics as the header, its ``` invisible. */
+.editor .fence:not(.cb-first) { padding-block: 3px; font-size: 10.5px; }
 .editor .cb-first + .cb { padding-top: 6px; }
 .editor .cb-last { margin-bottom: 6px; padding-bottom: 4px; border-bottom-width: 1px; border-radius: 0 0 8px 8px; }
 .editor .cb-first.cb-last { border-radius: 8px; }
