@@ -64,6 +64,7 @@ function save(data) {
 
 ipcMain.handle('load', () => load());
 ipcMain.on('save', (e, data) => { save(data); e.returnValue = true; });
+ipcMain.handle('update', () => updater.installPending(win));
 ipcMain.handle('copy', (_e, text) => clipboard.writeText(text));
 ipcMain.handle('confirm', async (_e, message, detail, okLabel) => {
   const { response } = await dialog.showMessageBox(win, {

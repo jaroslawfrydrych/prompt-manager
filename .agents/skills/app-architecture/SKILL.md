@@ -13,8 +13,9 @@ DOM or CSS feature before writing code, and never add a package for something a 
 - `main.js` — main process. Owns `data.json` (`load`, atomic `save` via `.tmp` + `rename`, unreadable files are
   copied to `data.json.corrupt-<ts>` instead of being overwritten), the app menu, native context menus, dialogs,
   the About window and single-instance lock.
-- `updater.js` — main-process only, no renderer IPC. App menu ▸ Check for Updates… and a silent check 10 s after launch
-  (packaged builds only, at most once per 24 h, stamp in `userData/update-check.json`, not `data.json`). `net.fetch`es
+- `updater.js` — main process. App menu ▸ Check for Updates… and a silent check 10 s after launch
+  (packaged builds only, at most once per 24 h, stamp in `userData/update-check.json`, not `data.json`; only an
+  up-to-date answer writes the stamp, so a pending update or a failed check is re-checked on the next launch). `net.fetch`es
   GitHub's `releases/latest`, compares `tag_name` with `compare()` (numeric x.y.z, prerelease never newer), picks the
   `-<arch>.dmg` asset (`pickAsset`). Install: download to temp (size checked), `hdiutil attach`, `codesign --verify`,
   bundle id + version from `Info.plist`, `ditto` next to the current bundle as `.<name>.app.update`, then a detached
@@ -24,13 +25,17 @@ DOM or CSS feature before writing code, and never add a package for something a 
   + this repo's `/releases/download/` path; the DMG is saved under a fixed name (`dmgPath`). If the swap rolls back,
   `SWAP` writes `userData/update-failed`; the next launch deletes it and offers the release page, and also removes
   a stale `.<name>.app.update`. Progress shows as the dock progress bar and a percentage dock badge.
+  A check that finds a newer version keeps it in `pending` and sends the `'update-available'` command to the renderer,
+  which unhides the sidebar's `#update` button; nothing is downloaded until the click calls `installPending` through
+  `window.api.update()`. The manual check still shows its dialog as well.
 - `preload.js` — the only bridge. Exposes `window.api`:
   - `load()` → saved state or `null`
   - `save(state)` → **synchronous** (`sendSync`) so a save from `beforeunload` completes
   - `copy(text)` → clipboard
   - `confirm(message, detail, okLabel)` → native warning dialog, resolves `true` on OK
   - `menu(items)` → native popup menu, resolves the clicked item's `id` (or index), `-1` when dismissed
-  - `onCommand(fn)` → commands sent from the app menu (`'new-prompt'`, `'new-project'`, `'search'`, `'undo'`, `'redo'`, `'bold'`, `'italic'`, `'underline'`)
+  - `update()` → installs the update a check already found (the sidebar button)
+  - `onCommand(fn)` → commands sent from the app menu (`'new-prompt'`, `'new-project'`, `'search'`, `'undo'`, `'redo'`, `'bold'`, `'italic'`, `'underline'`) and `'update-available'` from `updater.js`
 - `renderer.js` — the entire UI in one file, sectioned with `// ---------- name ----------` comments.
 
 New IPC: add `ipcMain.handle` in `main.js`, expose it in `preload.js`, call `window.api.x()` in the renderer.

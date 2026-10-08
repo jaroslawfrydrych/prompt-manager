@@ -53,6 +53,8 @@ if [ -d "$2" ]; then rm -rf "$4" "$3"; fi
 `;
 
 let busy = false;
+// The release the sidebar's Update button installs; set by a check that found a newer version.
+let pending = null;
 
 const parent = (win) => (win && !win.isDestroyed() ? win : undefined);
 const box = (win, opts) => (parent(win) ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts));
@@ -174,12 +176,18 @@ async function check(win, { silent = false } = {}) {
   let rel;
   try {
     rel = await latest();
-    try { fs.writeFileSync(stampFile(), JSON.stringify({ lastCheck: Date.now() })); } catch {}
     const version = String(rel.tag_name).replace(/^v/, '');
     if (rel.draft || rel.prerelease || compare(version, app.getVersion()) <= 0) {
+      // Only the up-to-date answer is stamped: while an update is pending every launch re-checks, so the
+      // sidebar button comes back. A failed check writes no stamp and is retried on the next launch.
+      try { fs.writeFileSync(stampFile(), JSON.stringify({ lastCheck: Date.now() })); } catch {}
       if (!silent) await box(win, { type: 'info', message: 'You’re up to date.', detail: `Prompt Manager ${app.getVersion()} is the latest version.` });
       return;
     }
+    // Nothing is downloaded until the user clicks the sidebar button (or, from the manual check, the dialog).
+    pending = { rel, version };
+    if (parent(win)) win.webContents.send('command', 'update-available');
+    if (silent) return;
     const notes = String(rel.body || '').trim();
     const { response } = await box(win, {
       type: 'info',
@@ -190,7 +198,21 @@ async function check(win, { silent = false } = {}) {
     if (response === 1) openPage(rel.html_url);
     if (response === 0) await install(win, rel, version);
   } catch (e) {
-    if (!silent || rel) await offerPage(win, rel ? 'The update could not be installed.' : 'Could not check for updates.', e.message, rel && rel.html_url);
+    if (!silent) await offerPage(win, rel ? 'The update could not be installed.' : 'Could not check for updates.', e.message, rel && rel.html_url);
+  } finally {
+    busy = false;
+  }
+}
+
+// The sidebar button: install the release a check already found. Resolves (so the button can go back) when the
+// install was refused or failed; a successful one quits the app.
+async function installPending(win) {
+  if (!pending || busy) return;
+  busy = true;
+  try {
+    await install(win, pending.rel, pending.version);
+  } catch (e) {
+    await offerPage(win, 'The update could not be installed.', e.message, pending.rel.html_url);
   } finally {
     busy = false;
   }
@@ -198,7 +220,7 @@ async function check(win, { silent = false } = {}) {
 
 const stampFile = () => path.join(app.getPath('userData'), 'update-check.json');
 
-// Launch housekeeping and a silent check a little after launch, at most once a day; never in development runs
+// Launch housekeeping and a silent check a little after launch, at most once a day while up to date; never in development runs
 // (and so never in the smoke test). Returns whether a check was scheduled.
 function auto(win) {
   if (!app.isPackaged) return false;
@@ -216,4 +238,4 @@ function auto(win) {
   return true;
 }
 
-module.exports = { compare, pickAsset, assetUrl, dmgPath, check, auto, SWAP };
+module.exports = { compare, pickAsset, assetUrl, dmgPath, check, installPending, auto, SWAP };

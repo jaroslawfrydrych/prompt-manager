@@ -528,6 +528,27 @@ app.on('browser-window-created', (_e, win) => {
       assert.strictEqual(pickAsset([{ name: 'notes.txt' }], 'arm64'), undefined);
       assert.deepStrictEqual(Menu.getApplicationMenu().items[0].submenu.items.slice(0, 2).map((i) => i.label), ['About Prompt Manager', 'Check for Updates…']);
 
+      // the sidebar Update button: hidden until the main process reports an update, accent coloured, installs on click
+      const upd = require('../updater.js');
+      assert.ok(await js(`document.querySelector('#update').hidden`), 'the update button must be hidden by default');
+      assert.strictEqual(
+        await js(`getComputedStyle($('#update')).backgroundColor`),
+        await js(`getComputedStyle(document.querySelector('.nav-icon')).color`), // All = var(--accent)
+      );
+      win.webContents.send('command', 'update-available');
+      await wait(200);
+      assert.ok(!await js(`document.querySelector('#update').hidden`));
+      assert.ok((await js(`$('#update').textContent`)).includes('Update available'));
+      let installed = false;
+      upd.installPending = async () => { installed = true; await wait(200); };
+      await js(`$('#update').click()`);
+      await wait(100);
+      assert.ok((await js(`$('#update').textContent`)).includes('Updating…'));
+      await wait(300);
+      assert.ok(installed, 'clicking the update button must run the install path');
+      assert.ok(!await js(`$('#update').disabled`), 'a refused install must re-enable the button');
+      assert.ok((await js(`$('#update').textContent`)).includes('Update available'));
+
       console.log('SMOKE OK');
       app.exit(0);
     } catch (err) {

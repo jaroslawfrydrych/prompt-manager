@@ -1228,6 +1228,19 @@ $('#search').addEventListener('input', (e) => { query = e.target.value; renderHe
 $('#search').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.target.value = ''; query = ''; render(); e.target.blur(); } });
 $('#new-prompt').addEventListener('click', newPrompt);
 
+// Installing quits the app; it only resolves when the update was refused or failed, so put the button back.
+$('#update').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  btn.querySelector('span').textContent = 'Updating…';
+  try {
+    await window.api.update();
+  } finally {
+    btn.querySelector('span').textContent = 'Update available';
+    btn.disabled = false;
+  }
+});
+
 $('#list').addEventListener('click', (e) => {
   const actEl = e.target.closest('[data-act]');
   const card = e.target.closest('.card');
@@ -1275,6 +1288,8 @@ window.api.onCommand((cmd) => {
   if (cmd === 'new-prompt') newPrompt();
   if (cmd === 'new-project') newProject();
   if (cmd === 'search') { $('#search').focus(); $('#search').select(); }
+  // An update check found a newer version; the install starts only when the button is clicked.
+  if (cmd === 'update-available') $('#update').hidden = false;
   // Edit ▸ Undo / Redo (⌘Z / ⇧⌘Z): the editor has its own history, other fields use the browser's.
   if (cmd === 'undo' || cmd === 'redo') {
     const ed = document.activeElement;

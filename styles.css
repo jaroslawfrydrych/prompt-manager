@@ -122,6 +122,16 @@ kbd { font: 11px -apple-system, sans-serif; padding: 1px 5px; border-radius: 4px
   background: var(--field); border: 0; border-radius: 4px; outline: 3px solid rgba(10, 132, 255, 0.55);
 }
 .nav-empty { padding: 4px 8px; color: var(--text-3); }
+/* Sits after #nav (which flex-grows), so it stays in the bottom-left corner. */
+.update {
+  display: flex; align-items: center; gap: 8px; flex: none;
+  height: 28px; margin: 0 10px 12px; padding: 0 10px; border-radius: 6px;
+  background: var(--accent); color: #fff; font-weight: 500;
+}
+.update:hover:not(:disabled) { background: #2a93ff; }
+.update:focus-visible { outline: 3px solid rgba(10, 132, 255, 0.55); outline-offset: 2px; } /* offset: the ring would vanish on the accent fill */
+.update[hidden] { display: none; } /* flex would otherwise beat the attribute's UA display: none */
+.update:disabled { opacity: .6; }
 
 /* ---------- toolbar ---------- */
 
