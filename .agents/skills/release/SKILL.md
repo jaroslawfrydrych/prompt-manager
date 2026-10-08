@@ -53,5 +53,6 @@ fix the version and tag again.
   `Applications` symlink and creates a compressed DMG with `hdiutil`. No third-party tools.
 - The app is not notarized, so Gatekeeper asks the user to confirm the first launch (README, Install section).
 
-Every push to `master` and every pull request also builds the DMG and uploads it as the `Prompt-Manager-dmg`
-workflow artifact, which is the way to test a build before releasing.
+Every push to `master` and every pull request also builds an ad-hoc signed DMG and uploads it as the
+`Prompt-Manager-dmg` workflow artifact. To test a signed and notarized build before releasing, run the workflow
+manually (Actions → Build → Run workflow) on the branch.

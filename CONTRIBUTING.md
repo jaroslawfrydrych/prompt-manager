@@ -98,4 +98,4 @@ otherwise the release job fails.
    ```
 
 CI then builds `Prompt-Manager-<version>-arm64.dmg` and publishes it as a GitHub Release with generated notes.
-The app is ad-hoc signed but not notarized, so the first launch has to be allowed as described in the README.
+Release builds are signed with Developer ID and notarized in CI (see the release skill for the secrets it needs).
