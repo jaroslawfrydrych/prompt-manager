@@ -29,8 +29,11 @@ Prompt Manager is where those prompts wait their turn.
 
 - **One queue per project.** A Mail-style sidebar lists your projects, each with its pending count.
   **All** shows prompts from every project, **Flagged** only the flagged ones.
-- **Prompts are plain text.** Click a prompt to edit it, `⌘↩` to save. Fenced ```` ``` ```` code blocks and `` `inline code` `` are rendered,
-  and every code block has its own copy button.
+- **Prompts are plain text.** Click a prompt to edit it, `⌘↩` to save. Spelling is checked as you type; right-click a word for suggestions. Fenced ```` ``` ```` code blocks, `` `inline code` `` and `-` / `1.` lists are rendered,
+  and every code block has its own copy button (a fence must start a line: ```` ``` ```` mid-line is not a code block). Code shows as code while you type too: in a block `↩` keeps the line's indentation,
+  and ```` ``` ```` + `↩` adds the closing fence. `**bold**`, `*italic*` and `<u>underline</u>` show formatted as you type
+  (the markers stay visible, dimmed); `⌘B` / `⌘I` / `⌘U` toggle them on the selection. Lists are formatted live while you type: `↩` continues a list
+  (on an empty item it moves it up a level, or ends the list) and `⇥` / `⇧⇥` nest an item; numbers stay in sequence.
 - **Copy, paste, done.** One click copies the whole prompt, ready to paste into your agent. `⌥`-click also marks it as done.
   Done prompts move to a **Done** tab, where you can restore them.
 - **See what's getting old.** Every prompt shows when it was written. Pending prompts older than 3 days get an orange badge,
@@ -39,7 +42,10 @@ Prompt Manager is where those prompts wait their turn.
 - **Drag & drop.** Reorder projects and prompts. To move a prompt to another project, drop it on that project
   or, in **All** and **Flagged**, click the project name on the card.
 - **Light & dark.** Follows the system appearance.
-- **Local only.** Everything is stored in one JSON file on your Mac. The app makes no network requests.
+- **Local only.** Everything is stored in one JSON file on your Mac. The only network requests are update checks
+  to GitHub (once a day after launch, or **Prompt Manager ▸ Check for Updates…**).
+- **Updates in place.** When a new release is out, **Install and Relaunch** downloads it, verifies it and replaces the app.
+  This needs the app in a folder you can write to (like **Applications**), not running from the disk image.
 
 ## Install
 
@@ -61,6 +67,8 @@ The app is not notarized by Apple, so macOS will block the first launch. To open
 | `⌘1`–`⌘9` / `⌘0` | Jump to project / All |
 | `⌘F` | Search |
 | `⌘↩` / `Esc` | Save / cancel editing |
+| `⇥` / `⇧⇥` | Indent / outdent a list item while editing |
+| `⌘B` / `⌘I` / `⌘U` | Bold / italic / underline the selection while editing |
 | `⌥`-click **Copy** | Copy and mark as done |
 
 Double-click a project to rename it, right-click it to rename or delete it. Right-click a prompt (or click `…`) to flag, move or delete it.

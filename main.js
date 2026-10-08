@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, clipboard, nativeTheme, nativeImage, Menu, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const updater = require('./updater');
 
 const REPO_URL = 'https://github.com/jaroslawfrydrych/prompt-manager';
 
@@ -124,6 +125,27 @@ function createWindow() {
     },
   });
   lockDown(win);
+  // Text fields get the macOS edit menu with spelling suggestions on top. Any field that is editable
+  // (input, textarea, contenteditable); the renderer's own card/project menus preventDefault, so this never fires for them.
+  win.webContents.on('context-menu', (_e, { isEditable, misspelledWord, dictionarySuggestions, editFlags }) => {
+    if (!isEditable) return;
+    const wc = win.webContents;
+    const spelling = misspelledWord ? [
+      ...dictionarySuggestions.map((s) => ({ label: s, click: () => wc.replaceMisspelling(s) })),
+      ...(dictionarySuggestions.length ? [] : [{ label: 'No Guesses Found', enabled: false }]),
+      { type: 'separator' },
+      { label: 'Learn Spelling', click: () => wc.session.addWordToSpellCheckerDictionary(misspelledWord) },
+      { type: 'separator' },
+    ] : [];
+    Menu.buildFromTemplate([
+      ...spelling,
+      { role: 'cut', enabled: editFlags.canCut },
+      { role: 'copy', enabled: editFlags.canCopy },
+      { role: 'paste', enabled: editFlags.canPaste },
+      { type: 'separator' },
+      { role: 'selectAll', enabled: editFlags.canSelectAll },
+    ]).popup({ window: win });
+  });
   win.loadFile(path.join(__dirname, 'index.html'));
 }
 
@@ -140,6 +162,7 @@ app.whenReady().then(() => {
       label: app.name,
       submenu: [
         { label: `About ${app.name}`, click: showAbout },
+        { label: 'Check for Updates…', click: () => updater.check(win) },
         { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },
@@ -159,7 +182,32 @@ app.whenReady().then(() => {
         { role: 'close' },
       ],
     },
-    { role: 'editMenu' },
+    {
+      // Undo/Redo go to the renderer: the editor keeps its own history, which native undo knows nothing of.
+      label: 'Edit',
+      submenu: [
+        { label: 'Undo', accelerator: 'CmdOrCtrl+Z', click: send('undo') },
+        { label: 'Redo', accelerator: 'Shift+CmdOrCtrl+Z', click: send('redo') },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'pasteAndMatchStyle' },
+        { role: 'delete' },
+        { role: 'selectAll' },
+        { type: 'separator' },
+        { label: 'Speech', submenu: [{ role: 'startSpeaking' }, { role: 'stopSpeaking' }] },
+      ],
+    },
+    {
+      // Markdown formatting for the prompt editor; the renderer ignores these in any other field.
+      label: 'Format',
+      submenu: [
+        { label: 'Bold', accelerator: 'CmdOrCtrl+B', click: send('bold') },
+        { label: 'Italic', accelerator: 'CmdOrCtrl+I', click: send('italic') },
+        { label: 'Underline', accelerator: 'CmdOrCtrl+U', click: send('underline') },
+      ],
+    },
     {
       label: 'View',
       submenu: [
@@ -178,6 +226,7 @@ app.whenReady().then(() => {
     },
   ]));
   createWindow();
+  updater.auto(win);
 });
 
 app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });

@@ -248,18 +248,54 @@ button.chip:hover { background: var(--fill-3); color: var(--text); }
 .cb-copy svg { width: 13px; height: 13px; }
 .codeblock:hover .cb-copy { opacity: 1; }
 .cb-copy:hover { background: var(--fill-2); }
-.codeblock pre { margin: 0; padding: 10px 12px 12px; overflow-x: auto; }
+.codeblock pre { margin: 0; padding: 10px 12px 12px; overflow-x: auto; tab-size: 4; } /* same as the editor's .cb */
 .body .codeblock code { font: 12.5px/1.6 var(--mono); color: var(--code-fg); white-space: pre; padding: 0; background: none; border-radius: 0; }
 
+.body ul, .body ol { margin: 0; padding-left: 1.5em; }
+.body li::marker { color: var(--text-2); }
+.body strong, .editor strong { font-weight: 600; }
+
 .editor {
-  display: block; width: 100%; min-height: 66px; padding: 0; margin: 0;
-  border: 0; outline: 0; resize: none; background: none;
-  font-family: inherit; overflow: hidden;
+  position: relative; min-height: 66px; outline: 0;
+  user-select: text; cursor: text; /* body is user-select: none */
   caret-color: var(--accent);
 }
-.editor::placeholder { color: var(--text-3); }
+.editor:empty::before { content: attr(data-placeholder); position: absolute; color: var(--text-3); pointer-events: none; }
+/* List lines hang after the marker (indent spaces included). The marker stays plain inline text so
+   ↑/↓ keep their column; it is monospace (0.6em per character), so .w<n> (its length) gives its width. */
+.editor .li { padding-left: calc(var(--w) * 0.6em); text-indent: calc(var(--w) * -0.6em); }
+.editor .mk { font-family: var(--mono); white-space: pre; /* the space after the marker must not hang */ color: var(--text-2); }
+.editor .w2 { --w: 2; } .editor .w3 { --w: 3; } .editor .w4 { --w: 4; } .editor .w5 { --w: 5; } .editor .w6 { --w: 6; }
+.editor .w7 { --w: 7; } .editor .w8 { --w: 8; } .editor .w9 { --w: 9; } .editor .w10 { --w: 10; } .editor .w11 { --w: 11; }
+.editor .w12 { --w: 12; } .editor .w13 { --w: 13; } .editor .w14 { --w: 14; } .editor .w15 { --w: 15; } .editor .w16 { --w: 16; }
+.editor .w17 { --w: 17; } .editor .w18 { --w: 18; } .editor .w19 { --w: 19; } .editor .w20 { --w: 20; }
+/* Emphasis markers stay in the source text, dimmed and in the plain face. */
+.editor .fm { color: var(--text-3); font-weight: 400; font-style: normal; }
+/* Inline code looks like the preview's; its backticks are .fm, outside the pill. */
+.editor code {
+  font: 12.5px var(--mono);
+  padding: 1.5px 2px; border-radius: 5px;
+  background: var(--inline-code-bg); color: var(--inline-code-fg);
+}
+/* Fenced code: each line of the block is a .cb line div, together drawn as the preview's .codeblock.
+   white-space stays pre-wrap (inherited), which keeps spaces and tabs and wraps long lines. */
+.editor .cb {
+  font: 12.5px/1.6 var(--mono); letter-spacing: 0; tab-size: 4;
+  color: var(--code-fg); background: var(--code-bg);
+  padding: 0 12px; border: 1px solid var(--code-line); border-block-width: 0;
+}
+/* The opener (``` and language) is the block's header. */
+.editor .cb-first {
+  margin-top: 6px; padding-block: 3px; border-top-width: 1px; border-radius: 8px 8px 0 0;
+  font-size: 10.5px; color: var(--text-3);
+}
+.editor .cb-first:not(.cb-last) { border-bottom-width: 1px; }
+.editor .cb-first + .cb { padding-top: 6px; }
+.editor .cb-last { margin-bottom: 6px; padding-bottom: 4px; border-bottom-width: 1px; border-radius: 0 0 8px 8px; }
+.editor .cb-first.cb-last { border-radius: 8px; }
 .edit-hint { margin-top: 10px; font-size: 11px; color: var(--text-3); }
-.edit-hint code { font: 10.5px var(--mono); padding: 1px 4px; border-radius: 4px; background: var(--inline-code-bg); color: var(--text-2); }
+.edit-hint > span { white-space: nowrap; } /* wraps only between groups */
+.edit-hint code { white-space: nowrap; font: 10.5px var(--mono); padding: 1px 4px; border-radius: 4px; background: var(--inline-code-bg); color: var(--text-2); }
 
 /* ---------- drag & drop ---------- */
 

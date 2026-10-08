@@ -13,13 +13,24 @@ DOM or CSS feature before writing code, and never add a package for something a 
 - `main.js` — main process. Owns `data.json` (`load`, atomic `save` via `.tmp` + `rename`, unreadable files are
   copied to `data.json.corrupt-<ts>` instead of being overwritten), the app menu, native context menus, dialogs,
   the About window and single-instance lock.
+- `updater.js` — main-process only, no renderer IPC. App menu ▸ Check for Updates… and a silent check 10 s after launch
+  (packaged builds only, at most once per 24 h, stamp in `userData/update-check.json`, not `data.json`). `net.fetch`es
+  GitHub's `releases/latest`, compares `tag_name` with `compare()` (numeric x.y.z, prerelease never newer), picks the
+  `-<arch>.dmg` asset (`pickAsset`). Install: download to temp (size checked), `hdiutil attach`, `codesign --verify`,
+  bundle id + version from `Info.plist`, `ditto` next to the current bundle as `.<name>.app.update`, then a detached
+  `/bin/sh` (`SWAP`, paths as positional args) waits for the pid to exit and swaps the bundles; `app.quit()` lets the
+  renderer's `beforeunload` save first. Refuses (offers the release page) when unpackaged, translocated, on `/Volumes`
+  or the folder or the bundle itself is not writable. The download URL must parse (`assetUrl`) to `https://github.com`
+  + this repo's `/releases/download/` path; the DMG is saved under a fixed name (`dmgPath`). If the swap rolls back,
+  `SWAP` writes `userData/update-failed`; the next launch deletes it and offers the release page, and also removes
+  a stale `.<name>.app.update`. Progress shows as the dock progress bar and a percentage dock badge.
 - `preload.js` — the only bridge. Exposes `window.api`:
   - `load()` → saved state or `null`
   - `save(state)` → **synchronous** (`sendSync`) so a save from `beforeunload` completes
   - `copy(text)` → clipboard
   - `confirm(message, detail, okLabel)` → native warning dialog, resolves `true` on OK
   - `menu(items)` → native popup menu, resolves the clicked item's `id` (or index), `-1` when dismissed
-  - `onCommand(fn)` → commands sent from the app menu (`'new-prompt'`, `'new-project'`, `'search'`)
+  - `onCommand(fn)` → commands sent from the app menu (`'new-prompt'`, `'new-project'`, `'search'`, `'undo'`, `'redo'`, `'bold'`, `'italic'`, `'underline'`)
 - `renderer.js` — the entire UI in one file, sectioned with `// ---------- name ----------` comments.
 
 New IPC: add `ipcMain.handle` in `main.js`, expose it in `preload.js`, call `window.api.x()` in the renderer.
@@ -30,7 +41,9 @@ Never enable `nodeIntegration` or pass Node objects to the renderer.
 - Every `BrowserWindow`: `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, and `lockDown(win)`
   (blocks navigation, opens only `https://github.com/` links externally).
 - Every HTML file has a CSP meta tag with `default-src 'self'`; no inline scripts or styles, no remote assets.
-- The app makes no network requests.
+- The app makes no network requests except `updater.js`: `api.github.com` for the latest release and GitHub release
+  downloads (`github.com`, which redirects to `objects.githubusercontent.com` / `release-assets.githubusercontent.com`),
+  for updates only. Prompts never leave the Mac; do not add other network use.
 
 ## State (`data.json`)
 
@@ -46,7 +59,7 @@ state = {
 }
 ```
 
-- UI-only state lives in module variables, not in `state`: `editing` (`{ id, draft, isNew, caret }`),
+- UI-only state lives in module variables, not in `state`: `editing` (`{ id, draft, isNew, caret, hist }`),
   `renaming` (project id), `query`.
 - IDs come from `uid()`. Timestamps are `Date.now()` numbers.
 - Changing the shape: increment `version`, migrate older files in the load IIFE (see the v1 → v2 sort),
@@ -68,6 +81,8 @@ Rules that follow from the full rebuild:
 ## Adding UI actions
 
 - Card and empty-state buttons carry `data-act="name"`; handle them in the `#list` click handler.
+- Editable fields (any input/textarea/contenteditable) get the native edit + spelling menu from the
+  `context-menu` handler in `main.js`; renderer menus must `preventDefault()` the `contextmenu` event to replace it.
 - Context menu entries go into `promptMenu` / `projectMenu` with ids like `'flag:red'`, `'move:<projectId>'`
   and are executed by `promptAction(p, id)`. Menu item shape (see `menuTemplate` in `main.js`):
   `'-'` separator, a plain string (resolves to its index), or
@@ -77,10 +92,49 @@ Rules that follow from the full rebuild:
   `window.api.onCommand`; `⌘0`–`⌘9` live in the `document` keydown handler; editor keys in `editorKeys`.
   Document new shortcuts in the README table.
 
-## Markdown
+## Markdown and the editor
 
-`renderMarkdown` supports only fenced ```` ``` ```` blocks (with a language label and a copy button) and
-`` `inline code` ``. Keep it that small; prompts are pasted into agents as plain text.
+`renderMarkdown` supports fenced ```` ``` ```` blocks (with a language label and a copy button; a fence is a line
+starting with ```` ``` ```` after optional spaces, the `FENCE` rule that `decorate`, `inFence`, `renumber` and
+`fmtRuns` use too, so a ```` ``` ```` mid-line is never a block, and an unclosed fence runs to the end),
+`` `inline code` ``, `-` / `*` / `1.` / `1)` lists nested by indentation (2 spaces per level), and `**bold**`,
+`*italic*` / `_italic_` and `<u>underline</u>` (`inline(text, keep)` → `emphasis`). Keep it small; prompts are pasted
+into agents as plain text. Emphasis runs on **escaped** text (so `<u>` is only the literal tag pair, never other HTML),
+never crosses a line, skips inline code and fences and lines over 2000 chars, and `*` / `_` only count at word
+edges (an opener never follows a digit, `/` or `.`, nor a letter for `_`, and a `*` opener follows a letter only
+when a letter or digit comes next, so `README*, LICENSE*` stays plain; a closer is never followed by a letter or
+digit, and a closing `*` never follows `/` nor precedes `.ext`, so snake_case, `src/*.js`, `*.md, docs/*.md` and
+`2*3*4` stay plain while `plain**bold**` renders). Each pass swaps its markers for private-use placeholders and
+keeps a match only if it nests cleanly with earlier ones; with `keep` (the editor) the markers stay in the text as
+dimmed `.fm` spans next to the `<strong>` / `<em>` / `<u>`.
+
+The editor is a `contenteditable="plaintext-only"` div that shows the markdown **source**, one `<div class="ln">` per
+line, decorated by `decorate(src)` (escaped text in spans). Its text (`readText(ed)`) always equals `editing.draft`;
+the stored format stays a plain markdown string. On `input` the changed lines are re-decorated (`paint`) and the
+selection is restored by plain-text offset (`selOf` / `setSel`); nothing is touched during IME composition.
+Rewriting the DOM breaks native undo, so the editor keeps its own stack in `editing.hist` (capped at 200 steps).
+Edit ▸ Undo / Redo (⌘Z / ⇧⌘Z) are therefore not native roles: they send the `'undo'` / `'redo'` command, which
+runs `undoRedo` in the editor and `document.execCommand` in any other field. Edits made by key handling (Enter, Tab,
+paste, cut) go through `applyEdit` as pure `(text, selection) → [text, selection]` functions such as `enterEdit` and
+`tabEdit` (and `backEdit`: Backspace after a marker outdents / removes it); list edits end with `renumber`, which
+keeps numbered siblings consecutive and never touches lines inside a ```` ``` ```` fence. Format ▸ Bold / Italic /
+Underline (⌘B / ⌘I / ⌘U) send `'bold'` / `'italic'` / `'underline'`, which run `fmtEdit` through `applyEdit`: each
+selected line is a part (past the list marker, edge whitespace trimmed, never in code); `emRuns(line)` maps the
+renderer's runs to raw offsets, and when every part sits in a run of that kind (looking past other kinds' markers
+that enclose it, so ⌘A ⌘B on `<u>**x**</u>` unbolds) the runs are split around it, else
+the other parts are wrapped (a caret inside a word toggles the word; a caret against a run's marker steps across it
+instead of nesting an empty pair; an italic wrap whose `*` would merge into a neighbouring `*` uses `_`, so the `_`
+pass runs before the `*` passes). Native edits (`sync`) and paste / cut (`replaceSel`) go through `relist`, which
+renumbers only when the edit changed the line count, so a retyped number sticks. Code is decorated too: inline
+code via `inline(text, true)` is a `<code spellcheck="false">` between dimmed `.fm` backticks, and every line of a
+fenced block (fences included) is a `.ln.cb` div with `spellcheck="false"`, never list or emphasis decorated;
+`.cb-first` is the opener (dimmed, drawn like the preview's header), `.cb-last` the closer or, while unclosed, the
+last line, so the lines together look like the preview's `.codeblock`. In a block `enterEdit` keeps the line's
+indentation (not on ⇧↩), and ↩ at the end of an opener nothing closes yet inserts the closing fence (one undo
+step); ↩ after a typed closer directly above another bare closer steps over it (the duplicate goes, caret on the
+line after) unless that bare line opens a following block. List lines hang after their marker: the marker is plain
+inline monospace text (never `inline-block`, which breaks ↑/↓ columns) and the line gets
+a `.w<n>` class (marker length) that sets `padding-left` and a negative `text-indent`.
 
 ## Styling
 
