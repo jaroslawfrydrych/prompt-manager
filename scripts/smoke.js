@@ -472,28 +472,57 @@ app.on('browser-window-created', (_e, win) => {
       await key('Enter', { metaKey: true });
       const sh = 'run:\n```sh\n  ls\n  pwd\n```';
       assert.ok((await until((d) => d.prompts.some((p) => p.text === sh))).prompts.some((p) => p.text === sh));
+      // typing ``` opens the block at once (closer added, caret inside), never typing on in the hidden fence line;
       // typing the closer by habit above the auto-inserted one steps over it: one closer, caret after the block
       await js('newPrompt()');
-      await type('```js');
-      await key('Enter');
+      await type('``');
+      await type('`');
+      assert.strictEqual(await draft(), '```\n\n```');
+      assert.strictEqual(await js(`selOf(${ed}).start`), 4);
       await type('x');
       await key('Enter');
       await type('```');
-      await key('Enter');
-      assert.strictEqual(await draft(), '```js\nx\n```\n');
-      assert.strictEqual(await js(`selOf(${ed}).start`), 12);
+      assert.strictEqual(await draft(), '```\nx\n```\n');
+      assert.strictEqual(await js(`selOf(${ed}).start`), 10);
       await type('after');
       assert.deepStrictEqual(await js(`[...${ed}.children].map((l) => l.className)`), ['ln cb fence cb-first', 'ln cb', 'ln cb fence cb-last', 'ln']);
       await cmd('undo');
       await cmd('undo');
-      assert.strictEqual(await draft(), '```js\nx\n```\n```');
+      assert.strictEqual(await draft(), '```\nx\n\n```');
       await cmd('redo');
       await cmd('redo');
       await key('Enter', { metaKey: true });
-      assert.ok(await until((d) => d.prompts.some((p) => p.text === '```js\nx\n```\nafter')));
+      assert.ok(await until((d) => d.prompts.some((p) => p.text === '```\nx\n```\nafter')));
       // ...but not over the opener of a following block
       assert.deepStrictEqual(await edit('enterEdit', '```\na\n```\n```\nb\n```', 9), ['```\na\n```\n\n```\nb\n```', { start: 10, end: 10 }]);
       assert.deepStrictEqual(await edit('enterEdit', '```\n```\n```\nb\n```', 7), ['```\n```\n\n```\nb\n```', { start: 8, end: 8 }]);
+      // fence lines are a block's edges, not text: ⌫ / ⌦ never join text into one (an empty line or block goes instead)
+      assert.strictEqual(await edit('fenceJoin', '```\nx\n```\nb', 10, -1), null);
+      assert.strictEqual(await edit('fenceJoin', '```\nx\n```\nb', 5, 1), null);
+      assert.deepStrictEqual(await edit('fenceJoin', '```\nx\n```\n', 10, -1), ['```\nx\n```', { start: 5, end: 5 }]);
+      assert.deepStrictEqual(await edit('fenceJoin', 'a\n```\n\n```\nb', 6, -1), ['a\nb', { start: 1, end: 1 }]);
+      // ↑ / ↓ and clicks skip fence lines; past a block that ends the prompt ↓ adds a line to step out to
+      await js(`newPrompt(); document.execCommand('insertText', false, 'top\\n\`\`\`\\ncode\\n\`\`\`'); setSel(${ed}, { start: 1, end: 1 })`);
+      // the move past a fence happens in the key handler itself, so the caret never shows on one, even for a frame
+      assert.strictEqual(await js(`${ed}.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })); selOf(${ed}).start`), 8);
+      await js(`setSel(${ed}, { start: 1, end: 1 })`);
+      win.webContents.focus();
+      const arrow = async (k, expr) => {
+        win.webContents.sendInputEvent({ type: 'keyDown', keyCode: k });
+        win.webContents.sendInputEvent({ type: 'keyUp', keyCode: k });
+        await poll(expr);
+      };
+      await poll('editing.caret === 1'); // the setSel above has reached the caret tracking
+      await arrow('Down', `selOf(${ed}).start === 8`);
+      await arrow('Down', `editing.draft === 'top\\n\`\`\`\\ncode\\n\`\`\`\\n' && selOf(${ed}).start === 17`);
+      await arrow('Up', `selOf(${ed}).start === 12`);
+      await arrow('Up', `selOf(${ed}).start === 3`);
+      assert.ok(await js(`readText(${ed}) === editing.draft`));
+      const edge = await js(`const r = ${ed}.querySelector('.cb-first').getBoundingClientRect(); [Math.round(r.left + 40), Math.round(r.top + r.height / 2)]`);
+      win.webContents.sendInputEvent({ type: 'mouseDown', x: edge[0], y: edge[1], button: 'left', clickCount: 1 });
+      win.webContents.sendInputEvent({ type: 'mouseUp', x: edge[0], y: edge[1], button: 'left', clickCount: 1 });
+      await poll(`selOf(${ed}).start === 8`);
+      await key('Escape');
       // preview and editor agree: a ``` mid-line is not a fence, an indented one is
       const mid = '- item ```x``` here\n- next';
       assert.strictEqual(await js(`const d = document.createElement('div'); d.innerHTML = renderMarkdown(${JSON.stringify(mid)}); d.querySelectorAll('.codeblock').length + ',' + d.querySelectorAll('li').length`), '0,2');
@@ -670,6 +699,58 @@ app.on('browser-window-created', (_e, win) => {
       await until((d) => byId(d, 'a').text === ta);
       assert.strictEqual(await textOf('b'), tb);
       await key('Escape');
+
+      // projects and folders: New Project dialog names the project after the chosen folder, ⋯ menu, Send to Claude
+      const { dialog, shell } = require('electron');
+      const repo = path.join(dir, 'my-repo');
+      fs.mkdirSync(repo);
+      const stubs = { showOpenDialog: dialog.showOpenDialog, showMessageBox: dialog.showMessageBox, openExternal: shell.openExternal, proto: app.getApplicationNameForProtocol };
+      const opened = [];
+      let claude = '';
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [repo] });
+      dialog.showMessageBox = async () => ({ response: 0 });
+      shell.openExternal = async (url) => { opened.push(url); };
+      app.getApplicationNameForProtocol = () => claude;
+      await js(`newProject(); 0`);
+      assert.ok(await js(`$('#project-dialog').open && $('#pd-hint').hidden`));
+      await js(`$('#pd-choose').click()`);
+      await poll(`$('#pd-name').value === 'my-repo'`);
+      await js(`$('#pd-name').value = 'mine'; $('#pd-ok').click()`);
+      const mine = (await until((d) => d.projects.some((p) => p.path === repo))).projects.find((p) => p.path === repo);
+      assert.strictEqual(mine.name, 'mine', 'a typed name wins over the folder name');
+      assert.strictEqual(await js(`state.view`), mine.id);
+      assert.strictEqual(await js(`$('#folder').textContent`), repo);
+      // ⋯ on hover opens the HTML menu with Delete in red; right-click stays native
+      await js(`${nav(mine.id)}.querySelector('[data-act=more]').click()`);
+      assert.ok(await js(`$('#popmenu').matches(':popover-open')`));
+      assert.ok(await js(`const r = ${nav(mine.id)}.getBoundingClientRect(); const t = parseFloat($('#popmenu').style.top); t > r.top && t < r.bottom + 8`), 'the ⋯ menu opens under its project');
+      assert.deepStrictEqual(await js(`[...$('#popmenu').querySelectorAll('button')].map((b) => b.textContent + (b.classList.contains('danger') ? '!' : ''))`),
+        ['Rename', 'Set Folder…', 'Delete Project…!']);
+      await js(`$('#popmenu').hidePopover()`);
+      // Send: no Claude → nothing opened, not done; with Claude → URL carries the raw prompt and folder, prompt done
+      const sendText = 'Fix *this*\n```\nnpm i & go\n```';
+      await js(`state.prompts.unshift({ id: 's1', projectId: '${mine.id}', text: ${JSON.stringify(sendText)}, createdAt: Date.now(), doneAt: null, flag: null }); render()`);
+      await js(`${card('s1')}.querySelector('[data-act=send]').click()`);
+      await wait(300);
+      assert.deepStrictEqual(opened, []);
+      assert.ok(!await js(`state.prompts.find((p) => p.id === 's1').doneAt`));
+      claude = 'Claude';
+      await js(`${card('s1')}.querySelector('[data-act=send]').click()`);
+      assert.ok(byId(await until((d) => byId(d, 's1')?.doneAt), 's1').doneAt);
+      assert.deepStrictEqual(opened, [`claude://code/new?q=${encodeURIComponent(sendText)}&folder=${encodeURIComponent(repo)}`]);
+      // a project without a folder never sends: the dialog asks for one
+      await js(`state.prompts.unshift({ id: 's2', projectId: 'p2', text: 'x', createdAt: Date.now(), doneAt: null, flag: null }); selectView('p2')`);
+      assert.strictEqual(await js(`$('#folder').textContent`), 'Set folder…');
+      await js(`${card('s2')}.querySelector('[data-act=send]').click()`);
+      await poll(`$('#project-dialog').open`);
+      assert.ok(await js(`!$('#pd-hint').hidden && $('#pd-name').value === state.projects.find((p) => p.id === 'p2').name`));
+      await js(`$('#project-dialog').close('cancel')`);
+      await wait(200);
+      assert.strictEqual(opened.length, 1);
+      assert.ok(await js(`!state.prompts.find((p) => p.id === 's2').doneAt && !project('p2').path`));
+      Object.assign(dialog, { showOpenDialog: stubs.showOpenDialog, showMessageBox: stubs.showMessageBox });
+      shell.openExternal = stubs.openExternal;
+      app.getApplicationNameForProtocol = stubs.proto;
 
       console.log('SMOKE OK');
       app.exit(0);

@@ -33,6 +33,10 @@ DOM or CSS feature before writing code, and never add a package for something a 
   - `save(state)` → **synchronous** (`sendSync`) so a save from `beforeunload` completes
   - `copy(text)` → clipboard
   - `confirm(message, detail, okLabel)` → native warning dialog, resolves `true` on OK
+  - `pickFolder(defaultPath)` → native folder picker, `{ path, name }` (name = basename) or `null`
+  - `sendToClaude(text, folder)` → `'sent'` | `'no-folder'` (unset or not a directory) | `'no-claude'` (nothing handles
+    `claude://`; main shows a warning) | `'failed'`; opens `claude://code/new?q=<text>&folder=<folder>` (each value
+    `encodeURIComponent`ed) with `shell.openExternal`
   - `menu(items)` → native popup menu, resolves the clicked item's `id` (or index), `-1` when dismissed
   - `update()` → installs the update a check already found (the sidebar button)
   - `onCommand(fn)` → commands sent from the app menu (`'new-prompt'`, `'new-project'`, `'search'`, `'undo'`, `'redo'`, `'bold'`, `'italic'`, `'underline'`) and `'update-available'` from `updater.js`
@@ -48,14 +52,15 @@ Never enable `nodeIntegration` or pass Node objects to the renderer.
 - Every HTML file has a CSP meta tag with `default-src 'self'`; no inline scripts or styles, no remote assets.
 - The app makes no network requests except `updater.js`: `api.github.com` for the latest release and GitHub release
   downloads (`github.com`, which redirects to `objects.githubusercontent.com` / `release-assets.githubusercontent.com`),
-  for updates only. Prompts never leave the Mac; do not add other network use.
+  for updates only. Prompts never leave the Mac; do not add other network use. Send to Claude is a local
+  `claude://` URL handed to the Claude desktop app, not a network request.
 
 ## State (`data.json`)
 
 ```js
 state = {
   version: 2,                 // bump + migrate in the load IIFE at the bottom of renderer.js
-  projects: [{ id, name, createdAt }],               // array order = sidebar order
+  projects: [{ id, name, createdAt, path /* project folder, optional */ }], // array order = sidebar order
   prompts: [{ id, projectId, text, createdAt, doneAt /* ts | null */, flag /* 'red'…'gray' | null */ }],
                               // array order = manual order of pending prompts
   view: 'all' | 'flagged' | <projectId>,
@@ -92,6 +97,11 @@ Rules that follow from the full rebuild:
   and are executed by `promptAction(p, id)`. Menu item shape (see `menuTemplate` in `main.js`):
   `'-'` separator, a plain string (resolves to its index), or
   `{ id, label, checked, enabled, icon: '#hex', submenu: [...] }`.
+- Projects: `PROJECT_ITEMS` is the one item list for the right-click menu (native, `projectMenu`) and the sidebar `⋯`
+  button (`popMenu`, an HTML `popover`, because native menus cannot colour Delete red); both run `projectAction`.
+  New Project and Send to Claude without a folder use the `<dialog id="project-dialog">` (`projectDialog(proj, hint)`
+  → `{ name, path }` or `null`; the name follows the chosen folder while empty). The header's `#folder` and
+  **Set Folder…** call `setFolder`, the native picker directly.
 - Destructive actions go through `window.api.confirm(...)`.
 - Keyboard: app-level shortcuts are menu accelerators in `main.js` that send a command handled in
   `window.api.onCommand`; `⌘0`–`⌘9` live in the `document` keydown handler; editor keys in `editorKeys`.
@@ -140,7 +150,7 @@ transparent, and every line of a fenced block (fences included) is a `.ln.cb` di
 list or emphasis decorated; fence lines also get `.fence` (10px tall: they are the block's top / bottom padding, the whole
 line, ``` ``` ``` and any text after it, transparent, so a block never shows a language label); `.cb-first` is the opener, `.cb-last` the closer or, while unclosed, the
 last line, so the lines together look exactly like the preview's `.codeblock` (no header, only the code); the preview drops
-blank lines next to a block, so one blank line right before an opener or after a closer is a 10px `.gap` line (the block's margin). Code, inline code and
+blank lines next to a block, so one blank line right before an opener or after a closer is a 10px `.gap` line (the block's margin). The caret never rests on a fence line: `editorKeys` makes the arrow keys' move itself (`Selection.modify`) and, if it lands on a fence, moves past it in the same keydown (`leaveFence`: ↑ / ↓ keep the column via `caretRangeFromPoint`; with nothing that way it adds an empty line at that end), so the caret never paints there; a `selectionchange` listener in `mountEditor` does the same for any other move (a click on a block's edge), and `fenceJoin` stops ⌫ / ⌦ from joining a line into a fence (an empty line, or an empty block, is removed instead). Typing the third backtick of a bare ```` ``` ```` line runs `enterEdit` there (`fenceTyped`, from `sync`), so a typed opener gets its closer with the caret inside and a typed closer steps out; edits set `editing.caret`, so the selection listener leaves those alone. Code, inline code and
 list rules are shared between `.body` and `.editor` in `styles.css` so toggling the editor moves nothing (smoke checks it). In a block `enterEdit` keeps the line's
 indentation (not on ⇧↩), and ↩ at the end of an opener nothing closes yet inserts the closing fence (one undo
 step); ↩ after a typed closer directly above another bare closer steps over it (the duplicate goes, caret on the

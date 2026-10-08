@@ -16,6 +16,7 @@ const ICONS = {
   check: '<svg viewBox="0 0 16 16"><path d="m3.5 8.5 3 3 6-7"/></svg>',
   more: '<svg viewBox="0 0 16 16"><circle cx="3.5" cy="8" r=".9"/><circle cx="8" cy="8" r=".9"/><circle cx="12.5" cy="8" r=".9"/></svg>',
   clock: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.8"/><path d="M8 4.8V8l2.2 1.4"/></svg>',
+  send: '<svg viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4"/></svg>',
   restore: '<svg viewBox="0 0 16 16"><path d="M3 6.5h7a3.5 3.5 0 0 1 0 7H6"/><path d="M5.5 4 3 6.5 5.5 9"/></svg>',
 };
 
@@ -377,6 +378,73 @@ function undoRedo(ed, dir) {
 }
 
 const inFence = (text, at) => fences(text.slice(0, at)) % 2 === 1;
+const lineStart = (text, at) => text.lastIndexOf('\n', at - 1) + 1;
+const onFence = (text, at) => FENCE.test(text.slice(lineStart(text, at)).split('\n', 1)[0]);
+
+// Fence lines are drawn as a block's top / bottom edge, not as text, so the caret never rests on one.
+// The offset of the nearest non-fence line from the fence line at `at` going dir (1 down: its start,
+// -1 up: its end), or null when there is none that way.
+function offFence(text, at, dir) {
+  const lines = text.split('\n');
+  const starts = [];
+  lines.reduce((o, l) => starts.push(o) && o + l.length + 1, 0);
+  for (let j = text.slice(0, at).split('\n').length - 1 + dir; j >= 0 && j < lines.length; j += dir) {
+    if (!FENCE.test(lines[j])) return starts[j] + (dir > 0 ? 0 : lines[j].length);
+  }
+  return null;
+}
+
+// Moves a caret that landed at `at` on a fence line, coming from `from`, past the line the way it was going;
+// with only fences that way the prompt gets a new empty line there, the way out of a block that starts or
+// ends it. x: the column to keep (↑ / ↓), at the target line's nearest visual row.
+function leaveFence(ed, at, from, x) {
+  const text = editing.draft;
+  const dir = at > from ? 1 : -1;
+  const to = offFence(text, at, dir);
+  if (to == null) {
+    applyEdit(ed, dir > 0 ? [`${text}\n`, { start: text.length + 1, end: text.length + 1 }] : [`\n${text}`, { start: 0, end: 0 }]);
+    return;
+  }
+  const ln = ed.children[text.slice(0, to).split('\n').length - 1];
+  const b = ln.getBoundingClientRect();
+  const cs = getComputedStyle(ln);
+  const half = parseFloat(cs.lineHeight) / 2;
+  const r = x != null && document.caretRangeFromPoint(x, dir > 0 ? b.top + parseFloat(cs.paddingTop) + half : b.bottom - parseFloat(cs.paddingBottom) - half);
+  if (r && ln.contains(r.startContainer)) {
+    getSelection().setBaseAndExtent(r.startContainer, r.startOffset, r.startContainer, r.startOffset);
+    editing.caret = selOf(ed).start;
+  } else setSel(ed, { start: editing.caret = to, end: to });
+}
+
+// Typing the third backtick of a bare ``` line acts as ↩ there: an opener gets its closer and the caret
+// goes on the line between, a closer typed in a block steps out of it (enterEdit), so the caret never
+// stays on the fence line, where the text would be hidden. null: not such a keystroke.
+function fenceTyped(text, { start, end }) {
+  const ls = lineStart(text, start);
+  if (start !== end || text[start] && text[start] !== '\n' || !/^ *```$/.test(text.slice(ls, start))) return null;
+  return enterEdit(text, { start, end }, false);
+}
+
+// Backspace / Delete (dir -1 / 1, any modifier) at the edge of a line next to a fence line would join the
+// line into the hidden fence (or the fence into text). An empty line goes instead (an empty block goes
+// whole); text is left alone (null). undefined: not at such an edge, the browser deletes.
+function fenceJoin(text, { start: at }, dir) {
+  const lines = text.split('\n');
+  const i = text.slice(0, at).split('\n').length - 1;
+  const ls = lineStart(text, at);
+  const le = ls + lines[i].length;
+  if (at !== (dir < 0 ? ls : le) || FENCE.test(lines[i]) || !FENCE.test(lines[i + dir] || '')) return undefined;
+  if (lines[i]) return null;
+  const os = i > 0 ? ls - lines[i - 1].length - 1 : 0; // the previous line's start
+  if (FENCE.test(lines[i - 1] || '') && FENCE.test(lines[i + 1] || '') && !inFence(text, os)) {
+    const out = [...lines.slice(0, i - 1), ...lines.slice(i + 2)].join('\n');
+    return [out, { start: Math.max(os - 1, 0), end: Math.max(os - 1, 0) }];
+  }
+  const out = dir < 0 ? text.slice(0, ls - 1) + text.slice(le) : text.slice(0, ls) + text.slice(le + 1);
+  const p = dir < 0 ? ls - 1 : ls;
+  const to = offFence(out, p, dir) ?? offFence(out, p, -dir) ?? p;
+  return [out, { start: to, end: to }];
+}
 
 // Enter: a list item continues the list (next number for numbered ones); an empty item ends it.
 function enterEdit(text, { start, end }, plain) {
@@ -784,7 +852,13 @@ function mountEditor(ed) {
   if (r) getSelection().setBaseAndExtent(r.startContainer, r.startOffset, r.startContainer, r.startOffset);
   const hit = r && selOf(ed);
   ed.classList.remove('hit');
-  const pos = editing.caret = hit ? hit.start : editing.caret == null ? editing.draft.length : editing.caret;
+  let pos = hit ? hit.start : editing.caret == null ? editing.draft.length : editing.caret;
+  // A click on a block's top edge (the opener) lands in the code, on its bottom edge (the closer) at the code's end.
+  if (onFence(editing.draft, pos)) {
+    const dir = inFence(editing.draft, lineStart(editing.draft, pos)) ? -1 : 1;
+    pos = offFence(editing.draft, pos, dir) ?? offFence(editing.draft, pos, -dir) ?? pos;
+  }
+  editing.caret = pos;
   const h = editing.hist = hists.get(editing.id) || { stack: [{ text: editing.draft, sel: { start: pos, end: pos } }], i: 0 };
   hists.set(editing.id, h);
   // Saving trims trailing whitespace and an emptied prompt keeps its old text, so the step may differ.
@@ -795,7 +869,8 @@ function mountEditor(ed) {
   let composing = false;
   const sync = (kind) => {
     const read = readText(ed);
-    const [text, sel] = relist(editing.draft, read, selOf(ed) || { start: read.length, end: read.length });
+    let [text, sel] = relist(editing.draft, read, selOf(ed) || { start: read.length, end: read.length });
+    if (kind === 'insertText') [text, sel] = fenceTyped(text, sel) || [text, sel];
     record(text, sel, kind, before);
     editing.draft = text;
     editing.caret = sel.start;
@@ -810,8 +885,28 @@ function mountEditor(ed) {
       undoRedo(ed, e.inputType === 'historyUndo' ? -1 : 1);
       return;
     }
-    if (!composing) before = selOf(ed);
+    if (composing) return;
+    before = selOf(ed);
+    if (before && before.start === before.end && e.inputType.startsWith('delete')) {
+      const r = fenceJoin(editing.draft, before, e.inputType.includes('Backward') ? -1 : 1);
+      if (r !== undefined) e.preventDefault();
+      if (r) applyEdit(ed, r);
+    }
   });
+  // A caret moved onto a fence line from another line by anything but the arrow keys (editorKeys), such as
+  // a click on a block's edge, skips past it. Edits set editing.caret themselves, so moving within a fence
+  // line (a pasted ```js) leaves the caret alone.
+  const onSel = () => {
+    if (!ed.isConnected) return document.removeEventListener('selectionchange', onSel);
+    const s = !composing && selOf(ed);
+    if (!s || s.start !== s.end || s.start === editing.caret) return;
+    const text = editing.draft;
+    const from = editing.caret;
+    editing.caret = s.start;
+    if (!onFence(text, s.start) || lineStart(text, from) === lineStart(text, s.start)) return;
+    leaveFence(ed, s.start, from);
+  };
+  document.addEventListener('selectionchange', onSel);
   // Leave the DOM alone while an IME (dead keys, accents) composes; re-decorate when it commits.
   ed.addEventListener('compositionstart', () => { composing = true; before = selOf(ed); });
   ed.addEventListener('compositionend', () => { composing = false; sync('insertText'); });
@@ -890,6 +985,7 @@ function navItem({ id, icon, label, count, cls = '' }) {
   return `<div class="nav-item${active} ${cls}" data-view="${id}"${draggable}>
     <span class="nav-icon">${icon}</span>${name}
     ${count ? `<span class="badge">${count}</span>` : ''}
+    ${draggable ? `<button class="act more" data-act="more" title="More">${ICONS.more}</button>` : ''}
   </div>`;
 }
 
@@ -954,7 +1050,8 @@ function cardHtml(p) {
         <button class="act more" data-act="more" title="More">${ICONS.more}</button>
         ${p.doneAt
           ? `<button class="act pill" data-act="toggle-done">${ICONS.restore}<span>Restore</span></button>`
-          : `<button class="act pill copy" data-act="copy" title="Copy prompt  ·  ⌥-click: copy and mark as done">${ICONS.copy}<span>Copy</span></button>`}
+          : `<button class="act pill send" data-act="send" title="Send to Claude Code as a new session">${ICONS.send}<span>Send to Claude</span></button>
+             <button class="act pill copy" data-act="copy" title="Copy prompt  ·  ⌥-click: copy and mark as done">${ICONS.copy}<span>Copy</span></button>`}
       </div>
       ${body}
     </div>
@@ -992,6 +1089,14 @@ function renderHeader() {
   const n = visiblePrompts().length;
   $('#title').textContent = title;
   $('#subtitle').textContent = `${n} ${tab === 'done' ? 'done' : 'pending'}`;
+  const proj = project(view);
+  const folder = $('#folder');
+  folder.hidden = !proj;
+  if (proj) {
+    folder.textContent = proj.path || 'Set folder…';
+    folder.title = proj.path ? 'Change the project folder' : 'Choose the project folder';
+    folder.classList.toggle('none', !proj.path);
+  }
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   $('#new-prompt').disabled = !state.projects.length;
 }
@@ -1014,10 +1119,12 @@ function selectView(id) {
   $('#list').scrollTop = 0;
 }
 
-function newProject() {
-  const p = { id: uid(), name: 'New Project', createdAt: Date.now() };
+async function newProject() {
+  const r = await projectDialog();
+  if (!r) return;
+  if (editing) commitEdit(false);
+  const p = { id: uid(), name: r.name, createdAt: Date.now(), ...(r.path && { path: r.path }) };
   state.projects.push(p);
-  renaming = p.id;
   state.view = p.id;
   state.lastProject = p.id;
   state.tab = 'pending';
@@ -1077,6 +1184,20 @@ function editorKeys(e) {
   } else if (e.key === 'Backspace' && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
     const r = backEdit(editing.draft, sel());
     if (r) { e.preventDefault(); applyEdit(ed, r); }
+  } else if (/^Arrow(Up|Down|Left|Right)$/.test(e.key) && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+    // The key's own move, made here (Selection.modify) so that one landing on a fence line is moved past it
+    // before the next paint: the caret never shows on a block's edge.
+    const s = getSelection();
+    const from = selOf(ed);
+    if (!from || from.start !== from.end) return; // collapsing a selection never lands on a fence
+    const vert = /Up|Down/.test(e.key);
+    const rc = s.getRangeAt(0).getClientRects()[0];
+    e.preventDefault();
+    s.modify('move', /Down|Right/.test(e.key) ? 'forward' : 'backward', vert ? 'line' : e.altKey ? 'word' : 'character');
+    const at = selOf(ed).start;
+    if (onFence(editing.draft, at) && lineStart(editing.draft, at) !== lineStart(editing.draft, from.start)) {
+      leaveFence(ed, at, from.start, vert && rc ? rc.left : null);
+    }
   }
 }
 
@@ -1117,10 +1238,17 @@ async function deletePrompt(p) {
   render();
 }
 
+// One item list for the right-click menu (native) and the sidebar ⋯ menu (popMenu, Delete in red).
+const PROJECT_ITEMS = [{ id: 'rename', label: 'Rename' }, { id: 'folder', label: 'Set Folder…' }, '-', { id: 'delete', label: 'Delete Project…' }];
+
 async function projectMenu(p) {
-  const choice = await window.api.menu(['Rename', '-', 'Delete Project…']);
-  if (choice === 0) { renaming = p.id; render(); }
-  if (choice === 2) {
+  projectAction(p, await window.api.menu(PROJECT_ITEMS));
+}
+
+async function projectAction(p, id) {
+  if (id === 'rename') { renaming = p.id; render(); }
+  if (id === 'folder') setFolder(p);
+  if (id === 'delete') {
     const n = state.prompts.filter((x) => x.projectId === p.id).length;
     const ok = await window.api.confirm(`Delete project “${p.name}”?`,
       n ? `Its ${n} prompt${n === 1 ? '' : 's'} (including done ones) will be deleted too. This cannot be undone.` : 'The project is empty.',
@@ -1159,6 +1287,91 @@ function promptAction(p, id) {
   if (kind === 'move') p.projectId = value;
   persist();
   render();
+}
+
+async function setFolder(p) {
+  const r = await window.api.pickFolder(p.path);
+  if (!r || !project(p.id)) return;
+  p.path = r.path;
+  persist();
+  render();
+}
+
+// Opens the prompt as a new Claude Code session in the project folder and marks it done.
+// Without a usable folder nothing is sent: the project dialog asks for one instead.
+async function sendToClaude(p) {
+  const proj = project(p.projectId);
+  if (!proj) return;
+  const r = await window.api.sendToClaude(p.text, proj.path);
+  if (r === 'no-folder') {
+    const hint = proj.path
+      ? `The folder ${proj.path} no longer exists. Choose the project folder on disk to send prompts to Claude.`
+      : 'Choose the project folder on disk to send prompts to Claude.';
+    const s = await projectDialog(proj, hint);
+    if (s && project(proj.id)) {
+      proj.name = s.name;
+      if (s.path) proj.path = s.path;
+      persist();
+      render();
+    }
+    return;
+  }
+  if (r !== 'sent' || p.doneAt) return;
+  if (editing && editing.id === p.id) commitEdit(false);
+  toggleDone(p);
+}
+
+// ---------- project dialog and ⋯ menu ----------
+
+// New Project, and Send to Claude without a folder. Resolves { name, path } or null when cancelled.
+// The name follows the chosen folder while it is empty or still the previous folder's name.
+function projectDialog(proj, hint) {
+  const dlg = $('#project-dialog');
+  if (dlg.open) return Promise.resolve(null);
+  const name = $('#pd-name');
+  let path = (proj && proj.path) || '';
+  let auto = null;
+  const showPath = () => {
+    $('#pd-path').textContent = path || 'No folder';
+    $('#pd-path').classList.toggle('none', !path);
+  };
+  $('#pd-title').textContent = proj ? 'Project Settings' : 'New Project';
+  $('#pd-ok').textContent = proj ? 'Save' : 'Create';
+  $('#pd-hint').textContent = hint || '';
+  $('#pd-hint').hidden = !hint;
+  name.value = proj ? proj.name : '';
+  showPath();
+  $('#pd-choose').onclick = async () => {
+    const r = await window.api.pickFolder(path);
+    if (!r) return;
+    path = r.path;
+    if (!name.value.trim() || name.value === auto) name.value = auto = r.name;
+    showPath();
+  };
+  dlg.returnValue = '';
+  dlg.showModal();
+  return new Promise((resolve) => {
+    dlg.onclose = () => resolve(dlg.returnValue === 'ok'
+      ? { name: name.value.trim() || path.split('/').filter(Boolean).pop() || 'New Project', path }
+      : null);
+  });
+}
+
+// HTML menu under an anchor (native menus cannot colour an item): Delete shows in red.
+function popMenu(anchor, items, pick) {
+  const m = $('#popmenu');
+  m.innerHTML = items.map((it) => (it === '-' ? '<hr>'
+    : `<button data-id="${it.id}"${it.id === 'delete' ? ' class="danger"' : ''}>${esc(it.label)}</button>`)).join('');
+  m.onclick = (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    m.hidePopover();
+    pick(b.dataset.id);
+  };
+  m.showPopover();
+  const r = anchor.getBoundingClientRect();
+  m.style.left = `${r.left}px`;
+  m.style.top = `${r.bottom + 4}px`;
 }
 
 async function projectPicker(p) {
@@ -1256,6 +1469,8 @@ $('#list').addEventListener('drop', (e) => {
 $('#nav').addEventListener('click', (e) => {
   if (e.target.closest('#add-project')) return newProject();
   const item = e.target.closest('.nav-item');
+  const more = item && e.target.closest('[data-act=more]');
+  if (more) return popMenu(more, PROJECT_ITEMS, (id) => projectAction(project(item.dataset.view), id));
   if (!item || e.target.closest('.rename')) return;
   // The sidebar is rebuilt on the first click, so a native dblclick never reaches the new node.
   if (e.detail === 2 && project(item.dataset.view)) { renaming = item.dataset.view; render(); return; }
@@ -1279,6 +1494,7 @@ $('#tabs').addEventListener('click', (e) => {
 $('#search').addEventListener('input', (e) => { query = e.target.value; renderHeader(); renderList(); });
 $('#search').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.target.value = ''; query = ''; render(); e.target.blur(); } });
 $('#new-prompt').addEventListener('click', newPrompt);
+$('#folder').addEventListener('click', () => { if (project(state.view)) setFolder(project(state.view)); });
 
 // Installing quits the app; it only resolves when the update was refused or failed, so put the button back.
 $('#update').addEventListener('click', async (e) => {
@@ -1304,6 +1520,7 @@ $('#list').addEventListener('click', (e) => {
     if (act === 'new-prompt') return newPrompt();
     if (!p) return;
     if (act === 'copy') return copyPrompt(p, actEl, e.altKey);
+    if (act === 'send') { actEl.disabled = true; return sendToClaude(p).finally(() => { actEl.disabled = false; }); }
     if (act === 'toggle-done') return toggleDone(p);
     if (act === 'more') return promptMenu(p);
     if (act === 'project') return projectPicker(p);
@@ -1317,7 +1534,7 @@ $('#list').addEventListener('click', (e) => {
 let pressed = null; // { id, dx, dy }
 $('#list').addEventListener('mousedown', (e) => {
   // Copy works while editing: keep the editor focused so its blur does not close it and re-render the button away.
-  if (e.target.closest('.card.editing [data-act=copy]')) e.preventDefault();
+  if (e.target.closest('.card.editing :is([data-act=copy], [data-act=send])')) e.preventDefault();
   const body = e.button === 0 && !e.ctrlKey && !e.target.closest('[data-act]') && e.target.closest('.card:not(.editing) .body');
   const r = body && body.getBoundingClientRect();
   pressed = body && { id: body.closest('.card').dataset.id, dx: e.clientX - r.left, dy: e.clientY - r.top };
