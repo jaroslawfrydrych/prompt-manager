@@ -134,7 +134,7 @@ renumbers only when the edit changed the line count, so a retyped number sticks.
 code via `inline(text, true)` is a `<code spellcheck="false">` whose `.fm` backticks sit inside the pill and are
 transparent, and every line of a fenced block (fences included) is a `.ln.cb` div with `spellcheck="false"`, never
 list or emphasis decorated; fence lines also get `.fence` (their ``` ``` ``` is transparent, the closer is drawn as the
-block's bottom bar); `.cb-first` is the opener (drawn like the preview's header), `.cb-last` the closer or, while unclosed, the
+block's bottom bar); `.cb-first` is the opener (drawn as the block's top bar; the preview's `.codeblock` has no header, only the code), `.cb-last` the closer or, while unclosed, the
 last line, so the lines together look like the preview's `.codeblock`. In a block `enterEdit` keeps the line's
 indentation (not on ⇧↩), and ↩ at the end of an opener nothing closes yet inserts the closing fence (one undo
 step); ↩ after a typed closer directly above another bare closer steps over it (the duplicate goes, caret on the

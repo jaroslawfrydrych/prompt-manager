@@ -158,13 +158,10 @@ function renderMarkdown(src) {
   let text = [];
   for (let i = 0; i < lines.length; i++) {
     if (!FENCE.test(lines[i])) { text.push(lines[i]); continue; }
-    const lang = lines[i].replace(FENCE, '').match(/^[\w+#.-]*/)[0];
     let j = i + 1;
     while (j < lines.length && !FENCE.test(lines[j])) j++;
     out += blocks(text.join('\n').replace(/\n+$/, ''));
-    out += `<div class="codeblock"><div class="cb-head"><span>${esc(lang || 'code')}</span>`
-      + `<button class="cb-copy" title="Copy code">${ICONS.copy}</button></div>`
-      + `<pre><code>${esc(lines.slice(i + 1, j).join('\n'))}</code></pre></div>`;
+    out += `<div class="codeblock"><pre><code>${esc(lines.slice(i + 1, j).join('\n'))}</code></pre></div>`;
     text = [];
     for (i = j; lines[i + 1] === ''; i++); // blank lines after a block don't render
   }
@@ -1255,14 +1252,6 @@ $('#list').addEventListener('click', (e) => {
     if (act === 'toggle-done') return toggleDone(p);
     if (act === 'more') return promptMenu(p);
     if (act === 'project') return projectPicker(p);
-  }
-
-  const cbCopy = e.target.closest('.cb-copy');
-  if (cbCopy) {
-    window.api.copy(cbCopy.closest('.codeblock').querySelector('code').textContent);
-    cbCopy.innerHTML = ICONS.check;
-    setTimeout(() => { cbCopy.innerHTML = ICONS.copy; }, 1200);
-    return;
   }
 
   // Click on text enters edit mode, unless the user is selecting text.

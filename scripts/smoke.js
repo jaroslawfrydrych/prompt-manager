@@ -483,7 +483,7 @@ app.on('browser-window-created', (_e, win) => {
       assert.strictEqual(await js(`const d = document.createElement('div'); d.innerHTML = renderMarkdown(${JSON.stringify(mid)}); d.querySelectorAll('.codeblock').length + ',' + d.querySelectorAll('li').length`), '0,2');
       assert.strictEqual(await js(`const d = document.createElement('div'); d.innerHTML = decorate(${JSON.stringify(mid)}); d.querySelectorAll('.cb').length + ',' + d.querySelectorAll('.li').length`), '0,2');
       assert.strictEqual(await js(`const d = document.createElement('div'); d.innerHTML = renderMarkdown('x\\n  \`\`\`py\\n  a = 1\\n\`\`\`\\n\\ny');
-        [d.firstChild.textContent, d.querySelector('.cb-head').textContent, d.querySelector('pre').textContent, d.lastChild.textContent].join('|')`), 'x|py|  a = 1|y');
+        [d.firstChild.textContent, d.querySelector('.codeblock').children.length, d.querySelector('pre').textContent, d.lastChild.textContent].join('|')`), 'x|1|  a = 1|y');
 
       // code markers are invisible in the editor but stay in the text
       const src = 'Fix `x`\n```js\nlet a = 1;\n```';
