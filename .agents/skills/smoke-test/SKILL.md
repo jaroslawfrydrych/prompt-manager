@@ -24,9 +24,11 @@ against a temporary data file and drives the real UI. CI runs it before building
   multi-statement snippets work; the value of the last expression is returned. Renderer functions are globals,
   so you can call `newPrompt()`, `selectView('all')`, `promptAction(p, 'flag:red')` or read `state` directly.
 - `read()` — parses the data file.
-- `until(check)` — polls the data file (up to 5 s) until `check(data)` is true and returns the data.
-  Saves are debounced (300 ms) and timers in a background window are throttled, so **always assert on
+- `until(check)` — polls the data file (up to 5 s) until `check(data)` is true and returns that data; it throws
+  on timeout (never returns stale data). Saves are debounced (300 ms) and timers in a background window are throttled, so **always assert on
   persisted data through `until`**, never right after an action.
+- `poll(expr)` — the renderer-side `until`: evaluates `expr` with `js()` (up to 5 s) until it is truthy, throws on timeout.
+  Use it to wait for the effect of real input (caret moved, editor opened, element focused).
 - `wait(ms)` — only for things that are not persisted (DOM updates, clipboard).
 - `dnd(src, dst, 'before' | 'after')` — defined in the renderer by the test; fires `dragstart`, `dragover`,
   `drop`, `dragend` at the top or bottom edge of the target.
@@ -49,6 +51,11 @@ assert.strictEqual(byId(await until((d) => byId(d, 'a').flag === 'blue'), 'a').f
 - Keys the browser handles itself (arrows, caret movement) need real input: `win.webContents.focus()`, then
   `win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Down' })` (and `keyUp`). It bypasses the app menu,
   so menu accelerators (⌘Z, ⌘N) are tested by sending their command: `win.webContents.send('command', 'undo')`.
+- `sendInputEvent` is async and not ordered with `js()` / `cmd()` (separate channels), so on a slow machine a later
+  `js()` can run before the input landed. After real input, wait for its effect — persisted text via `until`, or DOM
+  state via `poll` — before the next `js()` action; never a fixed `wait`. The app opens the editor in a `setTimeout(0)`
+  after `mouseup`; to assert that a click did *not* open it, register your own `mouseup` listener first and `poll` for
+  a flag it sets in a `setTimeout(0)` (it runs after the app's), then assert.
 - Native menus and dialogs cannot be clicked from the renderer. Call the action they resolve to instead
   (e.g. `promptAction(p, 'move:p2')`), and do not add steps that open a `confirm` dialog — it would block the test.
 - A double-click is `new MouseEvent('click', { bubbles: true, detail: 2 })`.
