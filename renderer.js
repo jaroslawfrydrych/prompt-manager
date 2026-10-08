@@ -181,20 +181,6 @@ function renderMarkdown(src) {
   return out + blocks(text.join('\n'));
 }
 
-const MD = 'text/x-prompt-markdown'; // clipboard type carrying the editor's raw markdown between its own copy and paste
-
-// The markdown code markers are not part of the code, so Copy drops fence lines (language tag
-// included) and inline-code backticks. Lines inside a block are code and stay as they are.
-// `fence` says whether src starts inside a block (a selection copied from the editor).
-function plainText(src, fence = false) {
-  const out = [];
-  for (const line of src.split('\n')) {
-    if (FENCE.test(line)) { fence = !fence; continue; }
-    out.push(fence ? line : line.replace(CODE, '$2'));
-  }
-  return out.join('\n');
-}
-
 // ---------- live editor ----------
 // A contenteditable showing the markdown source, one <div class="ln"> per line, decorated with spans.
 // Its text (readText) always equals editing.draft; every input re-decorates the changed lines and
@@ -798,17 +784,15 @@ function mountEditor(ed) {
   });
   ed.addEventListener('paste', (e) => {
     e.preventDefault();
-    const t = e.clipboardData.getData(MD) || e.clipboardData.getData('text/plain');
+    const t = e.clipboardData.getData('text/plain');
     if (t) replaceSel(ed, t.replace(/\r\n?/g, '\n')); // no text (e.g. an image): ignore, keep the selection
   });
-  // Other apps get plain text without code markers; the editor's own paste reads the exact markdown source (MD).
+  // Copy the exact markdown source rather than the browser's serialisation of the line divs.
   const copy = (e) => {
     const s = selOf(ed);
     if (!s || s.start === s.end) return;
     e.preventDefault();
-    const md = editing.draft.slice(s.start, s.end);
-    e.clipboardData.setData('text/plain', plainText(md, inFence(editing.draft, s.start)));
-    e.clipboardData.setData(MD, md);
+    e.clipboardData.setData('text/plain', editing.draft.slice(s.start, s.end));
     if (e.type === 'cut') replaceSel(ed, '');
   };
   ed.addEventListener('copy', copy);
@@ -1061,7 +1045,7 @@ function editorKeys(e) {
 }
 
 async function copyPrompt(p, btn, alsoDone) {
-  await window.api.copy(plainText(p.text));
+  await window.api.copy(p.text);
   btn.classList.add('copied');
   btn.querySelector('span').textContent = 'Copied';
   if (alsoDone) return setTimeout(() => toggleDone(p), 450);
@@ -1301,16 +1285,6 @@ document.addEventListener('keydown', (e) => {
     const p = state.projects[Number(e.key) - 1];
     if (p) { e.preventDefault(); selectView(p.id); }
   }
-});
-
-// Copying a selection from the preview: plain text only, so rich paste targets don't turn the
-// HTML's <pre> back into ``` fences. The editor and other fields handle their own copy.
-document.addEventListener('copy', (e) => {
-  const el = document.activeElement;
-  const t = getSelection().toString();
-  if (!t || e.defaultPrevented || /INPUT|TEXTAREA/.test(el?.tagName) || el?.isContentEditable) return; // nothing selected: leave the clipboard alone
-  e.preventDefault();
-  e.clipboardData.setData('text/plain', t);
 });
 
 window.api.onCommand((cmd) => {

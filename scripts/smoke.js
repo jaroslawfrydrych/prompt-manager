@@ -492,32 +492,19 @@ app.on('browser-window-created', (_e, win) => {
         const r = [readText(d), c('code .fm'), c('.fence.cb-first .fm'), c('.fence:not(.cb-first) .fm'), d.querySelector('code').textContent].join('|');
         d.remove(); r`), `${src}|rgba(0, 0, 0, 0)|rgba(0, 0, 0, 0)|rgba(0, 0, 0, 0)|\`x\``);
 
-      // Copy strips the fences (language tag included) and the inline backticks, code content kept
-      assert.strictEqual(await js(`plainText(${JSON.stringify(src)})`), 'Fix x\nlet a = 1;');
-      assert.strictEqual(await js(`plainText('a \`b\` c\\n\`\`\`\\nkeep \`this\`\\n\`\`\`')`), 'a b c\nkeep `this`');
+      // Copy copies the raw markdown: fences (language tag included) and inline backticks kept
       await js(`commitEdit(false); const p = state.prompts.find((q) => q.id === 'a'); p.doneAt = null; p.text = ${JSON.stringify(src)}; selectView(p.projectId); state.tab = 'pending'; render()`);
       await js(`${card('a')}.querySelector('[data-act=copy]').click()`);
       await wait(200);
-      assert.strictEqual(await clipboard.readText(), 'Fix x\nlet a = 1;');
-      // ⌘C in the editor: plain text for other apps (also from inside a block), raw markdown for its own paste
+      assert.strictEqual(await clipboard.readText(), src);
+      // ⌘C in the editor: the raw markdown slice (also from inside a block)
       const cp = (start, end) => js(`startEdit('a'); setSel(${ed}, { start: ${start}, end: ${end} }); const dt = new DataTransfer();
-        ${ed}.dispatchEvent(new ClipboardEvent('copy', { clipboardData: dt, bubbles: true, cancelable: true })); [dt.getData('text/plain'), dt.getData(MD)]`);
-      assert.deepStrictEqual(await cp(0, src.length), ['Fix x\nlet a = 1;', src]);
-      assert.deepStrictEqual(await cp(14, src.length), ['let a = 1;', src.slice(14)]);
-      assert.strictEqual(await js(`const dt = new DataTransfer(); dt.setData('text/plain', 'x'); dt.setData(MD, '\`\`\`\\ny\\n\`\`\`'); setSel(${ed}, { start: 0, end: 0 });
-        ${ed}.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); editing.draft.slice(0, 9)`), '```\ny\n```');
-      // copying a preview selection gives plain text only, no HTML a rich paste target could turn back into fences
-      assert.deepStrictEqual(await js(`commitEdit(false); const p = state.prompts.find((q) => q.id === 'a'); p.text = ${JSON.stringify(src)}; render();
-        getSelection().selectAllChildren(${card('a')}.querySelector('.body')); const dt = new DataTransfer();
-        ${card('a')}.dispatchEvent(new ClipboardEvent('copy', { clipboardData: dt, bubbles: true, cancelable: true })); [dt.types.join(), dt.getData('text/plain').includes('\`')]`), ['text/plain', false]);
-      // ⌘C with nothing selected leaves the clipboard alone
-      assert.deepStrictEqual(await js(`getSelection().collapse(${card('a')}, 0); const dt = new DataTransfer(); dt.setData('text/plain', 'keep');
-        const ev = new ClipboardEvent('copy', { clipboardData: dt, bubbles: true, cancelable: true }); ${card('a')}.dispatchEvent(ev); [ev.defaultPrevented, dt.getData('text/plain')]`), [false, 'keep']);
-      // a ```` fence (nesting ``` blocks) is a fence too
-      assert.strictEqual(await js(`plainText('\`\`\`\`\\ncode\\n\`\`\`\`')`), 'code');
-      // a ``` run closed on the same line is inline code (any run length), not a fence: no stray backticks anywhere
+        ${ed}.dispatchEvent(new ClipboardEvent('copy', { clipboardData: dt, bubbles: true, cancelable: true })); dt.getData('text/plain')`);
+      assert.strictEqual(await cp(0, src.length), src);
+      assert.strictEqual(await cp(14, src.length), src.slice(14));
+      await js(`commitEdit(false)`);
+      // a ``` run closed on the same line is inline code (any run length), not a fence
       for (const [md, plain] of [['Run ```npm install``` now', 'Run npm install now'], ['```npm install```', 'npm install']]) {
-        assert.strictEqual(await js(`plainText(${JSON.stringify(md)})`), plain);
         assert.strictEqual(await js(`const d = document.createElement('div'); d.innerHTML = renderMarkdown(${JSON.stringify(md)});
           [d.querySelectorAll('.codeblock').length, d.querySelector('code').textContent, d.textContent].join('|')`), `0|npm install|${plain}`);
         assert.strictEqual(await js(`const d = document.createElement('div'); d.innerHTML = decorate(${JSON.stringify(md)});
@@ -580,7 +567,7 @@ app.on('browser-window-created', (_e, win) => {
       assert.ok(await js(`const b = ${card('a')}.querySelector('[data-act=copy]'); const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
         b.dispatchEvent(down); b.click(); down.defaultPrevented`), 'mousedown on Copy must not blur the editor');
       await wait(200);
-      assert.strictEqual(await clipboard.readText(), 'live draft');
+      assert.strictEqual(await clipboard.readText(), 'live `draft`');
       assert.ok(await js(`editing && editing.id === 'a' && !!document.querySelector('.card.editing .editor')`));
       await js(`document.querySelector('.editor').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
       assert.strictEqual(byId(await until((d) => byId(d, 'a').text === before), 'a').text, before);
