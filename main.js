@@ -72,6 +72,29 @@ ipcMain.handle('confirm', async (_e, message, detail, okLabel) => {
   });
   return response === 0;
 });
+ipcMain.handle('pick-folder', async (_e, defaultPath) => {
+  const r = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'], defaultPath: defaultPath || undefined });
+  return r.canceled ? null : { path: r.filePaths[0], name: path.basename(r.filePaths[0]) };
+});
+// Hands the prompt to the Claude desktop app as a new Claude Code session in the project folder (a local URL scheme,
+// not a network request). 'no-folder' when the folder is unset or gone, 'no-claude' when nothing handles claude://.
+ipcMain.handle('send-claude', async (_e, text, folder) => {
+  if (!folder || !fs.statSync(folder, { throwIfNoEntry: false })?.isDirectory()) return 'no-folder';
+  if (!app.getApplicationNameForProtocol('claude://')) {
+    await dialog.showMessageBox(win, {
+      type: 'warning', message: 'Claude is not installed',
+      detail: 'Install the Claude desktop app to send prompts straight to Claude Code.',
+    });
+    return 'no-claude';
+  }
+  try {
+    await shell.openExternal(`claude://code/new?q=${encodeURIComponent(text)}&folder=${encodeURIComponent(folder)}`);
+    return 'sent';
+  } catch (e) {
+    await dialog.showMessageBox(win, { type: 'warning', message: 'Could not open Claude', detail: e.message });
+    return 'failed';
+  }
+});
 // Colour dot for menu items (Finder tag style): 12pt antialiased circle, BGRA premultiplied @2x.
 function dot(hex) {
   const n = 24, buf = Buffer.alloc(n * n * 4);

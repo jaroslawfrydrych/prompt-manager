@@ -19,7 +19,7 @@
     <header class="toolbar drag">
       <div class="title-wrap">
         <h1 id="title"></h1>
-        <div id="subtitle"></div>
+        <div class="subline"><span id="subtitle"></span><button class="folder no-drag" id="folder" hidden></button></div>
       </div>
       <div class="segmented no-drag" id="tabs">
         <button data-tab="pending">Pending</button>
@@ -35,6 +35,17 @@
     </header>
     <section id="list"></section>
   </main>
+  <dialog id="project-dialog">
+    <form method="dialog">
+      <h2 id="pd-title"></h2>
+      <p class="pd-hint" id="pd-hint" hidden></p>
+      <label class="pd-field"><span>Name</span><input id="pd-name" placeholder="Project name" spellcheck="false"></label>
+      <div class="pd-field"><span>Folder</span><span class="pd-path" id="pd-path"></span><button type="button" class="pd-btn" id="pd-choose">Choose…</button></div>
+      <!-- OK comes first so Enter submits it; CSS shows it on the right. -->
+      <div class="pd-buttons"><button value="ok" class="primary" id="pd-ok"></button><button value="cancel" class="pd-btn">Cancel</button></div>
+    </form>
+  </dialog>
+  <div class="popmenu" id="popmenu" popover></div>
   <script src="renderer.js"></script>
 </body>
 </html>

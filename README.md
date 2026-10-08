@@ -31,11 +31,14 @@ Prompt Manager is where those prompts wait their turn.
   **All** shows prompts from every project, **Flagged** only the flagged ones.
 - **Prompts are plain text.** Click a prompt to edit it (the caret lands where you clicked); changes are saved as you type, `⌘↩` or `Esc` closes the editor. `⌘Z` / `⇧⌘Z` undo and redo within the prompt you are editing, also edits from earlier editing of it; with no editor open, `⌘Z` reopens the last edited prompt and undoes there. Spelling is checked as you type; right-click a word for suggestions. Fenced ```` ``` ```` code blocks, `` `inline code` `` and `-` / `1.` lists are rendered
   (a fence must start a line: ```` ``` ```` mid-line is not a code block). Code shows as code while you type too: in a block `↩` keeps the line's indentation,
-  and ```` ``` ```` + `↩` adds the closing fence. `**bold**`, `*italic*` and `<u>underline</u>` show formatted as you type
+  and typing ```` ``` ```` on its own line opens the block at once (closing fence added, caret inside; typing it again on the last line steps out). The fence lines are the block's edges, not text: the caret skips them, and `↓` past a block that ends the prompt adds a line after it. `**bold**`, `*italic*` and `<u>underline</u>` show formatted as you type
   (the markers stay visible, dimmed); `⌘B` / `⌘I` / `⌘U` toggle them on the selection. Lists are formatted live while you type: `↩` continues a list
   (on an empty item it moves it up a level, or ends the list) and `⇥` / `⇧⇥` nest an item; numbers stay in sequence.
 - **Copy, paste, done.** One click copies the whole prompt, ready to paste into your agent (raw markdown, code backticks and fences included). `⌥`-click also marks it as done.
   Done prompts move to a **Done** tab, where you can restore them.
+- **Send to Claude.** Link a project to its folder on disk (when you create it, from the folder shown under the title,
+  or **Set Folder…** in the project's `⋯` / right-click menu). **Send to Claude** then opens the prompt as a new Claude Code
+  session in that folder in the Claude desktop app and marks it as done. Until the project has a folder, the button asks for one.
 - **See what's getting old.** Every prompt shows when it was written. Pending prompts older than 3 days get an orange badge,
   because they may be outdated.
 - **Finder-style flags.** Right-click a prompt (or use its `…` button) to give it a red, orange, yellow, green, blue, purple or gray flag.

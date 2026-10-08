@@ -116,6 +116,10 @@ kbd { font: 11px -apple-system, sans-serif; padding: 1px 5px; border-radius: 4px
 .nav-item .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .nav-item.active .badge { color: var(--text); }
+/* ⋯ replaces the count on hover (Claude Code style); click opens popMenu. */
+.nav-item .act.more { position: absolute; right: 4px; top: 4px; height: 20px; }
+.nav-item:hover .act.more { opacity: 1; }
+.nav-item:hover .badge { visibility: hidden; }
 .rename {
   flex: 1; min-width: 0; height: 22px; padding: 0 5px; margin-left: -5px;
   font: inherit; color: var(--text);
@@ -143,7 +147,12 @@ kbd { font: 11px -apple-system, sans-serif; padding: 1px 5px; border-radius: 4px
 }
 .title-wrap { flex: 1; min-width: 0; }
 #title { margin: 0; font-size: 15px; font-weight: 700; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#subtitle { font-size: 11px; color: var(--text-3); }
+.subline { display: flex; gap: 6px; min-width: 0; font-size: 11px; color: var(--text-3); }
+#subtitle { flex: none; }
+.folder { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: inherit; color: var(--text-2); }
+.folder::before { content: '· '; color: var(--text-3); }
+.folder:hover { color: var(--text); text-decoration: underline; }
+.folder.none { color: var(--accent); }
 
 .segmented { display: flex; padding: 2px; border-radius: 7px; background: var(--fill-1); }
 .segmented button { height: 22px; padding: 0 12px; border-radius: 5px; font-size: 12px; color: var(--text-2); }
@@ -223,7 +232,7 @@ button.chip:hover { background: var(--fill-3); color: var(--text); }
 .act.more svg { stroke-width: 2.4; }
 .card:hover .act.more { opacity: 1; }
 .act:hover { background: var(--fill-2); color: var(--text); }
-.act.pill { padding: 0 9px 0 7px; font-size: 12px; font-weight: 500; background: var(--fill-1); }
+.act.pill { padding: 0 9px 0 7px; font-size: 12px; font-weight: 500; background: var(--fill-1); color: var(--text); }
 .act.pill:hover { background: var(--fill-3); }
 .act.copy.copied { background: rgba(50, 215, 75, 0.16); color: var(--green); }
 
@@ -353,3 +362,40 @@ body.about {
 .about a:hover { text-decoration: underline; }
 .about .links { display: flex; gap: 14px; margin-top: 6px; font-size: 12.5px; }
 .about .small { margin-top: 18px; font-size: 10.5px; color: var(--text-3); }
+
+/* ---------- project dialog ---------- */
+
+#project-dialog {
+  width: 420px; padding: 20px; border: 0; border-radius: 12px;
+  background: var(--card); color: var(--text);
+  box-shadow: 0 0 0 .5px var(--line-strong), 0 20px 50px rgba(0, 0, 0, 0.35);
+}
+#project-dialog::backdrop { background: rgba(0, 0, 0, 0.3); }
+#project-dialog h2 { margin: 0 0 12px; font-size: 15px; font-weight: 700; }
+.pd-hint { margin: -4px 0 14px; color: var(--text-2); }
+.pd-field { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.pd-field > span:first-child { width: 48px; flex: none; color: var(--text-2); text-align: right; }
+.pd-field input {
+  flex: 1; min-width: 0; height: 26px; padding: 0 7px; border: 0; border-radius: 6px;
+  font: inherit; color: var(--text); background: var(--fill-1); outline: 0;
+}
+.pd-field input:focus { outline: 3px solid rgba(10, 132, 255, 0.5); }
+.pd-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+.pd-path.none { color: var(--text-3); }
+.pd-btn { height: 26px; padding: 0 12px; border-radius: 6px; background: var(--fill-2); }
+.pd-btn:hover { background: var(--fill-3); }
+.pd-buttons { display: flex; flex-direction: row-reverse; gap: 8px; margin-top: 18px; }
+.pd-buttons .primary { height: 26px; padding: 0 14px; }
+
+/* ---------- sidebar ⋯ menu ---------- */
+
+.popmenu {
+  position: fixed; inset: auto; margin: 0; min-width: 170px; padding: 5px;
+  border: 0; border-radius: 8px; background: var(--card); color: var(--text);
+  box-shadow: 0 0 0 .5px var(--line-strong), 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+.popmenu button { display: block; width: 100%; height: 24px; padding: 0 9px; border-radius: 5px; text-align: left; }
+.popmenu button:hover { background: var(--accent); color: #fff; }
+.popmenu button.danger { color: var(--red); }
+.popmenu button.danger:hover { background: var(--red); color: #fff; }
+.popmenu hr { margin: 5px 9px; border: 0; border-top: 1px solid var(--line-strong); }
