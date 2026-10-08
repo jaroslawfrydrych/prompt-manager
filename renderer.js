@@ -20,7 +20,11 @@ const ICONS = {
 };
 
 let state = { version: 2, projects: [], prompts: [], view: 'all', tab: 'pending' };
-let editing = null; // { id, draft, isNew, caret, hist }
+let editing = null; // { id, draft, orig, isNew, caret, hist, at }
+// Undo history per prompt for this session (not saved): reopening a prompt resumes it, and ⌘Z with
+// no editor open reopens the last edited prompt and undoes there.
+const hists = new Map(); // prompt id → { stack: [{ text, sel }], i, kind, at }
+let lastEdited = null; // prompt id
 let renaming = null; // project id
 let query = '';
 
@@ -47,7 +51,19 @@ window.addEventListener('beforeunload', () => {
 // ---------- markdown: ``` blocks, `inline` code, lists, **bold**, *italic*, <u>underline</u> ----------
 
 const LIST = /^( *)([-*]|\d+[.)]) /; // indent, marker
-const FENCE = /^ *```/;
+// A fence line: 3+ backticks (each one toggles; run lengths are not matched) after optional spaces, and no backtick
+// after them (CommonMark's info string rule), so ```npm install``` on its own line is inline code, not a block.
+const FENCE = /^ *`{3,}[^`\n]*$/;
+const fences = (s) => (s.match(new RegExp(FENCE.source, 'gm')) || []).length;
+// Inline code: a backtick run, then the same run closing it (`x`, ``x``, ```x```), never part of a longer run.
+const CODE = /(?<!`)(`+)([^`\n]+?)\1(?!`)/g;
+// text / code span pieces, alternating (text first), like split() with a capture group
+function codeSplit(s) {
+  const out = [];
+  let at = 0;
+  for (const m of s.matchAll(CODE)) { out.push(s.slice(at, m.index), m[0]); at = m.index + m[0].length; }
+  return [...out, s.slice(at)];
+}
 
 // Emphasis runs on escaped text, so <u> is only ever the literal tag pair, never other HTML.
 // Each pass swaps its markers for private-use placeholders (odd = open, even = close) so later
@@ -105,10 +121,11 @@ function emphasis(html, keep) {
 // Inline code is never formatted; in the editor (keep) its backticks stay in the text inside the pill,
 // invisible (CSS) so they read as its padding, and it is not spell checked (identifiers would all be underlined).
 function inline(text, keep) {
-  return text.split(/(`[^`\n]+`)/).map((s, i) => {
+  return codeSplit(text).map((s, i) => {
     if (i % 2 === 0) return emphasis(esc(s), keep);
-    const code = esc(s.slice(1, -1));
-    return keep ? `<code spellcheck="false"><span class="fm">\`</span>${code}<span class="fm">\`</span></code>` : `<code>${code}</code>`;
+    const t = /^`+/.exec(s)[0];
+    const code = esc(s.slice(t.length, -t.length));
+    return keep ? `<code spellcheck="false"><span class="fm">${t}</span>${code}<span class="fm">${t}</span></code>` : `<code>${code}</code>`;
   }).join('');
 }
 
@@ -158,29 +175,15 @@ function renderMarkdown(src) {
   let text = [];
   for (let i = 0; i < lines.length; i++) {
     if (!FENCE.test(lines[i])) { text.push(lines[i]); continue; }
-    const lang = lines[i].replace(FENCE, '').match(/^[\w+#.-]*/)[0];
     let j = i + 1;
     while (j < lines.length && !FENCE.test(lines[j])) j++;
     out += blocks(text.join('\n').replace(/\n+$/, ''));
-    out += `<div class="codeblock"><div class="cb-head"><span>${esc(lang || 'code')}</span>`
-      + `<button class="cb-copy" title="Copy code">${ICONS.copy}</button></div>`
-      + `<pre><code>${esc(lines.slice(i + 1, j).join('\n'))}</code></pre></div>`;
+    const code = esc(lines.slice(i + 1, j).join('\n'));
     text = [];
     for (i = j; lines[i + 1] === ''; i++); // blank lines after a block don't render
+    out += `<div class="codeblock${i >= lines.length - 1 ? ' end' : ''}"><pre><code>${code}</code></pre></div>`; // .end: nothing follows
   }
   return out + blocks(text.join('\n'));
-}
-
-// The markdown code markers are not part of the code, so Copy drops fence lines (language tag
-// included) and inline-code backticks. Lines inside a block are code and stay as they are.
-function plainText(src) {
-  let fence = false;
-  const out = [];
-  for (const line of src.split('\n')) {
-    if (FENCE.test(line)) { fence = !fence; continue; }
-    out.push(fence ? line : line.replace(/`([^`\n]+)`/g, '$1'));
-  }
-  return out.join('\n');
 }
 
 // ---------- live editor ----------
@@ -192,25 +195,29 @@ function plainText(src) {
 function decorate(src) {
   if (!src) return ''; // truly empty, so the :empty placeholder shows
   let fence = false;
+  let closer = -1; // index of the last closing fence
   return src.split('\n').map((line, i, all) => {
     const isFence = FENCE.test(line);
+    if (fence && isFence) closer = i;
     const code = fence || isFence; // fences and the code between them are left unformatted
     if (code) {
-      // A block like the preview's: .cb-first is the opener (its ``` and language dimmed, like the header),
-      // .cb-last the closer, or the last line while the fence is still open.
+      // A block like the preview's: .cb-first is the opener, .cb-last the closer, or the last line while the fence is still open.
       const cls = `${isFence ? ' fence' : ''}${!fence ? ' cb-first' : ''}${(fence && isFence) || i === all.length - 1 ? ' cb-last' : ''}`;
       if (isFence) fence = !fence;
-      // The ``` of a fence line is invisible (CSS): the line is drawn as the block's top / bottom edge.
-      const body = isFence ? line.replace(/^( *)(```)(.*)/, (x, ind, tick, rest) => `${ind}<span class="fm">${tick}</span>${esc(rest)}`)
+      // A fence line (``` and any text after it) is invisible (CSS): the line is drawn as the block's top / bottom edge.
+      const body = isFence ? `<span class="fm">${esc(line)}</span>`
         : !line ? '<br>' : esc(line);
       return `<div class="ln cb${cls}" spellcheck="false">${body}</div>`;
     }
+    // The preview drops blank lines next to a block, so one right before an opener or after a closer
+    // is drawn as the block's margin (.gap) instead of a full line.
+    if (!line && (closer === i - 1 || FENCE.test(all[i + 1] || ''))) return '<div class="ln gap"><br></div>';
     const m = LIST.exec(line);
     if (!m) return `<div class="ln">${!line ? '<br>' : inline(line, true)}</div>`;
-    // w<n>: marker width in (monospace) characters, for the hanging indent in CSS. ul/ol + l<n> (nesting
-    // level, 2 spaces per level) let CSS draw the preview's bullet over the dash; the text stays markdown.
+    // w<n>: marker width in (monospace) characters, l<n>: nesting level (2 spaces per level), for the hanging
+    // indent in CSS. ul/ol (+ data-n) let CSS draw the preview's bullet or number over the marker; the text stays markdown.
     const kind = /\d/.test(m[2]) ? 'ol' : 'ul';
-    return `<div class="ln li ${kind} l${Math.min(m[1].length >> 1, 2)} w${Math.min(m[0].length, 20)}"><span class="mk">${esc(m[0])}</span>${inline(line.slice(m[0].length), true)}</div>`;
+    return `<div class="ln li ${kind} l${Math.min(m[1].length >> 1, 5)} w${Math.min(m[0].length, 20)}"${kind === 'ol' ? ` data-n="${parseInt(m[2], 10)}"` : ''}><span class="mk">${esc(m[0])}</span>${inline(line.slice(m[0].length), true)}</div>`;
   }).join('');
 }
 
@@ -300,6 +307,7 @@ function record(text, sel, kind, before) {
   const h = editing.hist;
   const cur = h.stack[h.i];
   if (text === cur.text) return;
+  lastEdited = editing.id; // only a real change makes this the prompt ⌘Z reopens
   h.stack.length = h.i + 1;
   const sameSpot = before && before.start === cur.sel.start && before.end === cur.sel.end;
   if (kind && kind === h.kind && sameSpot && h.i > 0 && Date.now() - h.at < 1000) h.stack[h.i] = { text, sel };
@@ -315,8 +323,18 @@ function record(text, sel, kind, before) {
 function show(ed, text, sel) {
   editing.draft = text;
   editing.caret = sel.start;
+  saveDraft();
   paint(ed, text);
   setSel(ed, sel);
+}
+
+// Edits are saved as you type. An emptied prompt keeps its old text (delete is explicit).
+function saveDraft() {
+  const p = state.prompts.find((x) => x.id === editing.id);
+  if (!p) return;
+  const text = editing.draft.replace(/\s+$/, '');
+  p.text = text.trim() ? text : editing.orig;
+  persist();
 }
 
 // Edits made by our own key handling (Enter, Tab, paste, cut) are one undo step each.
@@ -336,15 +354,29 @@ const lineCount = (s) => s.split('\n').length;
 // around the caret so it has no gaps (code in fences is left alone). Edits within a line are left alone, so a typed number sticks.
 const relist = (old, text, sel) => (lineCount(old) === lineCount(text) ? [text, sel] : renumber(text, sel));
 
+function undoClosed(dir) {
+  const h = hists.get(lastEdited);
+  const p = state.prompts.find((x) => x.id === lastEdited);
+  if (!p || !h?.stack[h.i + dir]) return;
+  if (!visiblePrompts().includes(p)) {
+    state.tab = p.doneAt ? 'done' : 'pending';
+    selectView(p.projectId);
+  }
+  startEdit(p.id);
+  const ed = $('#list .editor');
+  if (ed) undoRedo(ed, dir);
+}
+
 function undoRedo(ed, dir) {
   const h = editing.hist;
   if (!h.stack[h.i + dir]) return;
   h.i += dir;
   h.kind = null;
+  lastEdited = editing.id;
   show(ed, h.stack[h.i].text, h.stack[h.i].sel);
 }
 
-const inFence = (text, at) => (text.slice(0, at).match(/^ *```/gm) || []).length % 2 === 1;
+const inFence = (text, at) => fences(text.slice(0, at)) % 2 === 1;
 
 // Enter: a list item continues the list (next number for numbered ones); an empty item ends it.
 function enterEdit(text, { start, end }, plain) {
@@ -355,7 +387,7 @@ function enterEdit(text, { start, end }, plain) {
   const fenced = inFence(text, ls);
   // ``` + ↩ (not ⇧↩) at the end of an opener that nothing closes yet adds the closing fence, caret on the line between.
   if (!plain && !fenced && start === le && /^ *```[\w+#.-]*$/.test(line)
-    && (text.slice(le).match(/^ *```/gm) || []).length % 2 === 0) {
+    && fences(text.slice(le)) % 2 === 0) {
     const ind = /^ */.exec(line)[0];
     return [`${text.slice(0, le)}\n${ind}\n${ind}\`\`\`${text.slice(le)}`, { start: le + 1 + ind.length, end: le + 1 + ind.length }];
   }
@@ -365,7 +397,7 @@ function enterEdit(text, { start, end }, plain) {
   const nl = text.indexOf('\n', le + 1);
   if (!plain && fenced && start === le && /^ *```$/.test(line) && le < text.length
     && /^ *```$/.test(text.slice(le + 1, nl < 0 ? text.length : nl))
-    && (text.slice(nl < 0 ? text.length : nl).match(/^ *```/gm) || []).length % 2 === 0) {
+    && fences(text.slice(nl < 0 ? text.length : nl)) % 2 === 0) {
     const rest = nl < 0 ? '\n' : text.slice(nl);
     return [text.slice(0, le) + rest, { start: le + 1, end: le + 1 }];
   }
@@ -421,7 +453,7 @@ function renumber(text, { start, end }) {
   let de = 0;
   let fenced = false;
   lines.forEach((line, i) => {
-    if (/^ *```/.test(line)) fenced = !fenced;
+    if (FENCE.test(line)) fenced = !fenced;
     const m = !fenced && i >= a && i <= b && LIST.exec(line);
     if (m) {
       const d = m[1].length;
@@ -487,7 +519,7 @@ function emRuns(line) {
   const out = [];
   const m = LIST.exec(line);
   let r = m ? m[0].length : 0;
-  line.slice(r).split(/(`[^`\n]+`)/).forEach((s, i) => {
+  codeSplit(line.slice(r)).forEach((s, i) => {
     const h = i % 2 ? null : marks(esc(s));
     if (!h) { r += s.length; return; }
     const open = [];
@@ -514,7 +546,7 @@ function emRuns(line) {
 }
 
 // Does a..b overlap a `code` span of the line? With a === b: is the caret strictly inside one?
-const inCode = (line, a, b = a) => [...line.matchAll(/`[^`\n]+`/g)].some((m) => m.index < b && a < m.index + m[0].length);
+const inCode = (line, a, b = a) => [...line.matchAll(CODE)].some((m) => m.index < b && a < m.index + m[0].length);
 
 // ⌘B / ⌘I / ⌘U, like Notes: each selected line is formatted on its own (past the list marker, without the
 // whitespace at the edges, never in code). When every part already sits in a run of that kind the runs are
@@ -604,7 +636,7 @@ function fmtRuns(text, { start, end }, kind, [o, c] = WRAP[kind]) {
     // Code spans can't be formatted, and a run can't cross one (inline() formats each side on its own),
     // so each gap between the spans is a part of its own.
     const gaps = [];
-    for (const g of l.line.matchAll(/`[^`\n]+`/g)) {
+    for (const g of l.line.matchAll(CODE)) {
       gaps.push([a, Math.min(b, l.ls + g.index)]);
       a = Math.max(a, l.ls + g.index + g[0].length);
     }
@@ -708,7 +740,7 @@ function fmtRuns(text, { start, end }, kind, [o, c] = WRAP[kind]) {
 // Marker chars a line shows as plain text (past its list marker, outside code).
 function literals(line) {
   const m = LIST.exec(line);
-  return line.slice(m ? m[0].length : 0).split(/(`[^`\n]+`)/)
+  return codeSplit(line.slice(m ? m[0].length : 0))
     .reduce((n, s, i) => n + (i % 2 ? 0 : ((marks(esc(s)) || esc(s)).match(/\*|_|&lt;\/?u&gt;/g) || []).length), 0);
 }
 
@@ -740,10 +772,23 @@ function checked(text, sel, kind, wrap) {
 }
 
 function mountEditor(ed) {
-  const pos = editing.caret == null ? editing.draft.length : editing.caret;
-  editing.hist = editing.hist || { stack: [{ text: editing.draft, sel: { start: pos, end: pos } }], i: 0 };
   paint(ed, editing.draft);
-  ed.focus();
+  // A click in the preview puts the caret at the same point in the editor: both lay the text out
+  // alike once the emphasis markers (the only visible ones) are hidden for the hit test.
+  const { at } = editing;
+  delete editing.at;
+  ed.classList.add('hit');
+  const b = ed.getBoundingClientRect();
+  const r = at && document.caretRangeFromPoint(b.left + at.dx, b.top + at.dy);
+  ed.focus({ preventScroll: !!at });
+  if (r) getSelection().setBaseAndExtent(r.startContainer, r.startOffset, r.startContainer, r.startOffset);
+  const hit = r && selOf(ed);
+  ed.classList.remove('hit');
+  const pos = editing.caret = hit ? hit.start : editing.caret == null ? editing.draft.length : editing.caret;
+  const h = editing.hist = hists.get(editing.id) || { stack: [{ text: editing.draft, sel: { start: pos, end: pos } }], i: 0 };
+  hists.set(editing.id, h);
+  // Saving trims trailing whitespace and an emptied prompt keeps its old text, so the step may differ.
+  if (h.stack[h.i].text !== editing.draft) h.stack[h.i] = { text: editing.draft, sel: { start: pos, end: pos } };
   setSel(ed, { start: pos, end: pos });
 
   let before = null; // selection before the current native edit
@@ -754,6 +799,7 @@ function mountEditor(ed) {
     record(text, sel, kind, before);
     editing.draft = text;
     editing.caret = sel.start;
+    saveDraft();
     if (paint(ed, text) || text !== read) setSel(ed, sel);
   };
   ed.addEventListener('beforeinput', (e) => {
@@ -892,7 +938,7 @@ function cardHtml(p) {
   const doneLabel = p.doneAt ? `done ${ago(p.doneAt)}` : '';
   const body = isEditing
     ? `<div class="editor" contenteditable="plaintext-only" spellcheck="true" role="textbox" aria-multiline="true" data-placeholder="What are we working on?"></div>
-       <div class="edit-hint"><span><kbd>⌘</kbd><kbd>↩</kbd> save</span> · <span><kbd>esc</kbd> cancel</span> · <span><code>\`code\`</code> <code>\`\`\`block\`\`\`</code></span> <span><code>- list</code> <code>1. list</code> <kbd>⇥</kbd> nest</span> · <span><kbd>⌘B</kbd> <kbd>⌘I</kbd> <kbd>⌘U</kbd> format</span></div>`
+       <div class="edit-hint"><span>saved as you type</span> · <span><kbd>⌘</kbd><kbd>↩</kbd> done</span> · <span><kbd>esc</kbd> close</span> · <span><code>\`code\`</code> <code>\`\`\`block\`\`\`</code></span> <span><code>- list</code> <code>1. list</code> <kbd>⇥</kbd> nest</span> · <span><kbd>⌘B</kbd> <kbd>⌘I</kbd> <kbd>⌘U</kbd> format</span> · <span><kbd>⌘Z</kbd> undo</span></div>`
     : `<div class="body">${renderMarkdown(p.text)}</div>`;
 
   const draggable = !isEditing && !p.doneAt ? ' draggable="true"' : '';
@@ -986,7 +1032,7 @@ function newPrompt() {
   // In Flagged, a new prompt is born flagged so it stays in view (like Reminders).
   const p = { id: uid(), projectId, text: '', createdAt: Date.now(), doneAt: null, flag: state.view === 'flagged' ? 'red' : null };
   state.prompts.unshift(p);
-  editing = { id: p.id, draft: '', isNew: true };
+  editing = { id: p.id, draft: '', orig: '', isNew: true };
   state.tab = 'pending';
   query = '';
   $('#search').value = '';
@@ -994,24 +1040,24 @@ function newPrompt() {
   $('#list').scrollTop = 0;
 }
 
-function startEdit(id) {
+function startEdit(id, at) {
   if (editing && editing.id === id) return;
   if (editing) commitEdit(false);
   const p = state.prompts.find((x) => x.id === id);
-  editing = { id, draft: p.text, isNew: false };
+  editing = { id, draft: p.text, orig: p.text, isNew: false, at };
   render();
 }
 
-function commitEdit(rerender = true, cancel = false) {
+function commitEdit(rerender = true) {
   if (!editing) return;
-  const { id, draft, isNew } = editing;
+  saveDraft(); // catches a draft typed mid-IME composition
+  const { id, isNew, hist } = editing;
   editing = null;
+  if (hist) hist.kind = null; // typing in the next session is a new undo step
   const p = state.prompts.find((x) => x.id === id);
   if (p) {
-    const text = cancel ? p.text : draft.replace(/\s+$/, '');
-    // Empty new prompt is discarded; clearing an existing one keeps the old text (delete is explicit).
-    if (text.trim()) p.text = text;
-    else if (isNew) state.prompts = state.prompts.filter((x) => x.id !== id);
+    // An empty new prompt is discarded.
+    if (isNew && !p.text.trim()) dropPrompts((x) => x.id === id);
   }
   persist();
   if (rerender) render();
@@ -1021,8 +1067,7 @@ function editorKeys(e) {
   const ed = e.currentTarget;
   if (e.isComposing || e.keyCode === 229) return; // keys belong to the IME while it composes
   const sel = () => selOf(ed) || { start: editing.draft.length, end: editing.draft.length };
-  if (e.key === 'Escape') { e.preventDefault(); commitEdit(true, true); }
-  else if (e.key === 'Enter' && e.metaKey) { e.preventDefault(); commitEdit(true); }
+  if (e.key === 'Escape' || e.key === 'Enter' && e.metaKey) { e.preventDefault(); commitEdit(true); }
   else if (e.key === 'Enter' && !e.altKey && !e.ctrlKey && !e.metaKey) {
     e.preventDefault(); // ⇧↩ is a plain newline that does not continue a list
     applyEdit(ed, enterEdit(editing.draft, sel(), e.shiftKey));
@@ -1036,7 +1081,7 @@ function editorKeys(e) {
 }
 
 async function copyPrompt(p, btn, alsoDone) {
-  await window.api.copy(plainText(p.text));
+  await window.api.copy(p.text);
   btn.classList.add('copied');
   btn.querySelector('span').textContent = 'Copied';
   if (alsoDone) return setTimeout(() => toggleDone(p), 450);
@@ -1058,10 +1103,16 @@ function toggleDone(p) {
   setTimeout(apply, 260);
 }
 
+// Removes prompts along with their undo history.
+function dropPrompts(gone) {
+  for (const p of state.prompts.filter(gone)) hists.delete(p.id);
+  state.prompts = state.prompts.filter((p) => !gone(p));
+}
+
 async function deletePrompt(p) {
   const ok = await window.api.confirm('Delete this prompt?', 'This cannot be undone.', 'Delete');
   if (!ok) return;
-  state.prompts = state.prompts.filter((x) => x.id !== p.id);
+  dropPrompts((x) => x.id === p.id);
   persist();
   render();
 }
@@ -1076,7 +1127,7 @@ async function projectMenu(p) {
       'Delete');
     if (!ok) return;
     state.projects = state.projects.filter((x) => x.id !== p.id);
-    state.prompts = state.prompts.filter((x) => x.projectId !== p.id);
+    dropPrompts((x) => x.projectId === p.id);
     persist();
     render();
   }
@@ -1137,6 +1188,7 @@ function moveItem(arr, id, targetId, side) {
 
 function dragStart(e, kind, el, id) {
   drag = { kind, id };
+  pressed = null; // a drag ends without mouseup, so the press must not open the editor on the next click elsewhere
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('text/plain', id);
   setTimeout(() => el.classList.add('dragging'), 0); // after the browser snapshots the drag image
@@ -1257,17 +1309,23 @@ $('#list').addEventListener('click', (e) => {
     if (act === 'project') return projectPicker(p);
   }
 
-  const cbCopy = e.target.closest('.cb-copy');
-  if (cbCopy) {
-    window.api.copy(cbCopy.closest('.codeblock').querySelector('code').textContent);
-    cbCopy.innerHTML = ICONS.check;
-    setTimeout(() => { cbCopy.innerHTML = ICONS.copy; }, 1200);
-    return;
-  }
-
   // Click on text enters edit mode, unless the user is selecting text.
-  if (p && e.target.closest('.body') && window.getSelection().isCollapsed) startEdit(p.id);
+  if (p && e.target.closest('.body') && window.getSelection().isCollapsed && !pressed) startEdit(p.id);
 });
+// A real click opens the editor once the mouseup is done, at the point pressed. The press is kept relative to the text box:
+// closing another editor on mousedown re-renders the list (cards shift, and the click may not reach the card).
+let pressed = null; // { id, dx, dy }
+$('#list').addEventListener('mousedown', (e) => {
+  // Copy works while editing: keep the editor focused so its blur does not close it and re-render the button away.
+  if (e.target.closest('.card.editing [data-act=copy]')) e.preventDefault();
+  const body = e.button === 0 && !e.ctrlKey && !e.target.closest('[data-act]') && e.target.closest('.card:not(.editing) .body');
+  const r = body && body.getBoundingClientRect();
+  pressed = body && { id: body.closest('.card').dataset.id, dx: e.clientX - r.left, dy: e.clientY - r.top };
+});
+document.addEventListener('mouseup', () => setTimeout(() => {
+  if (pressed && window.getSelection().isCollapsed && state.prompts.some((x) => x.id === pressed.id)) startEdit(pressed.id, pressed);
+  pressed = null;
+}, 0));
 $('#list').addEventListener('contextmenu', (e) => {
   const card = e.target.closest('.card');
   const p = card && state.prompts.find((x) => x.id === card.dataset.id);
@@ -1291,10 +1349,14 @@ window.api.onCommand((cmd) => {
   // An update check found a newer version; the install starts only when the button is clicked.
   if (cmd === 'update-available') $('#update').hidden = false;
   // Edit ▸ Undo / Redo (⌘Z / ⇧⌘Z): the editor has its own history, other fields use the browser's.
+  // With no field focused, it reopens the last edited prompt and undoes there (never another prompt while editing).
   if (cmd === 'undo' || cmd === 'redo') {
-    const ed = document.activeElement;
-    if (editing && ed?.classList.contains('editor')) undoRedo(ed, cmd === 'undo' ? -1 : 1);
-    else document.execCommand(cmd);
+    const f = document.activeElement;
+    const ed = $('#list .editor');
+    const dir = cmd === 'undo' ? -1 : 1;
+    if (f !== ed && f?.matches('input, textarea, [contenteditable]')) document.execCommand(cmd);
+    else if (editing) { if (ed) undoRedo(ed, dir); }
+    else undoClosed(dir);
   }
   // Format ▸ Bold / Italic / Underline (⌘B / ⌘I / ⌘U): only the prompt editor has markdown to format.
   if (WRAP[cmd]) {

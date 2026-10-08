@@ -29,6 +29,9 @@ async function until(check) {
 }
 
 app.on('browser-window-created', (_e, win) => {
+  // the physical cursor must not inject mousemoves between the synthetic mouseDown/mouseUp below (a click would
+  // become a selection drag); sendInputEvent still reaches the page
+  win.setIgnoreMouseEvents(true);
   win.webContents.on('console-message', (e) => console.log('renderer:', e.message));
   win.webContents.once('did-finish-load', async () => {
     const js = (c) => win.webContents.executeJavaScript(c.includes(';') ? `{ ${c} }` : c);
@@ -192,26 +195,24 @@ app.on('browser-window-created', (_e, win) => {
       assert.strictEqual(await js(`${body}.querySelectorAll(':scope > ul > li').length`), 2);
       assert.strictEqual(await js(`${body}.querySelector(':scope > ol').getAttribute('start')`), '3');
       assert.strictEqual(await js(`${body}.querySelector('ol > li > ol > li').textContent`), 'd');
-      // lists look like the preview while editing: the bullet glyph (disc, circle, square by level) is drawn
-      // over the -/* marker, numbers stay as typed, and the text is still the raw markdown
-      await js(`newPrompt(); document.execCommand('insertText', false, '- a\\n  * b\\n    - c\\n1. d')`);
+      // lists, inline code and code blocks look like the preview while editing: the bullet glyph (disc, circle,
+      // square by level) or number is drawn over the marker, and the text is still the raw markdown
+      const look = '- a `q`\\n  * b\\n    - c\\n1. d\\n\\n```js\\nk\\n```\\n\\ne';
+      await js(`newPrompt(); document.execCommand('insertText', false, '${look}')`);
       assert.deepStrictEqual(await js(`[...${ed}.querySelectorAll('.ln.li')].map((l) => l.className)`), [
         'ln li ul l0 w2', 'ln li ul l1 w4', 'ln li ul l2 w6', 'ln li ol l0 w3',
       ]);
-      assert.deepStrictEqual(
-        await js(`[...${ed}.querySelectorAll('.ln.li .mk')].map((m) => getComputedStyle(m, '::before').content)`),
-        ['"•"', '"◦"', '"▪"', 'none'],
-      );
-      // each level's bullet paints over its own -/*, one indent step further right, like the preview's nested
-      // <ul>: the declared left plus the text-indent the zero-width box inherits must be (w - 2) characters
-      const bullets = await js(`[...${ed}.querySelectorAll('.ul .mk')].map((m) => {
-        const s = getComputedStyle(m.parentElement);
-        return [parseFloat(getComputedStyle(m, '::before').left) + parseFloat(s.textIndent),
-          (parseFloat(s.getPropertyValue('--w')) - 2) * 0.6 * parseFloat(s.fontSize)];
-      })`);
-      assert.ok(bullets.every(([got, want]) => Math.abs(got - want) < 0.5), `bullet offsets: ${bullets}`);
-      assert.ok(await js(`readText(${ed}) === editing.draft && editing.draft === '- a\\n  * b\\n    - c\\n1. d'`));
+      assert.deepStrictEqual(await js(`[...${ed}.querySelectorAll('.ln.li')].map((l) => getComputedStyle(l, '::before').content)`),
+        ['"• "', '"◦ "', '"▪ "', '"1. "']);
+      assert.ok(await js(`readText(${ed}) === editing.draft && editing.draft === '${look}'`));
+      // ... at the same place: every text run (list text, inline code, code, text after a blank line) sits where the preview puts it
+      const boxes = (root) => js(`const r0 = ${root}.getBoundingClientRect(), w = document.createTreeWalker(${root}, NodeFilter.SHOW_TEXT), out = {};
+        for (let n; (n = w.nextNode());) { const m = /^[a-ekq]/.exec(n.data); if (!m) continue; const g = document.createRange(); g.setStart(n, m.index); g.setEnd(n, m.index + 1);
+          const r = g.getBoundingClientRect(); out[m[0]] = [r.left - r0.left, r.top - r0.top].map(Math.round); } out`);
+      const lookId = await js('editing.id');
+      const inEditor = await boxes(ed);
       await js(`${ed}.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+      assert.deepStrictEqual(await boxes(`document.querySelector('.card[data-id="${lookId}"] .body')`), inEditor);
       // numbered items keep consecutive numbers through Enter, Tab and Shift+Tab (caret follows a wider number)
       const edit = async (f, t, s, ...a) => js(`${f}(${JSON.stringify(t)}, { start: ${s}, end: ${s} }${a.map((x) => `, ${x}`).join('')})`);
       assert.deepStrictEqual(await edit('enterEdit', '1. a\n2. b', 4), ['1. a\n2. \n3. b', { start: 8, end: 8 }]);
@@ -251,7 +252,7 @@ app.on('browser-window-created', (_e, win) => {
       assert.strictEqual(await edit('backEdit', '```\n- x\n```', 6), null);
       await key('Escape');
       // ↓ into a list line keeps the caret's column instead of jumping to the item start (real key events)
-      await js(`newPrompt(); document.execCommand('insertText', false, 'abcdef\\n- one\\n  - two two\\n- three\\nxyz'); setSel(${ed}, { start: 6, end: 6 })`);
+      await js(`newPrompt(); document.execCommand('insertText', false, 'abcdefgh\\n- one\\n  - two two\\n- three\\nxyz'); setSel(${ed}, { start: 8, end: 8 })`);
       win.webContents.focus();
       const downs = [];
       for (let i = 0; i < 3; i++) {
@@ -260,7 +261,7 @@ app.on('browser-window-created', (_e, win) => {
         await wait(100);
         downs.push(await js(`selOf(${ed}).start`));
       }
-      assert.ok(downs[1] > 17 && downs[2] > 27, `caret after ↓: ${downs}`);
+      assert.ok(downs[1] > 19 && downs[2] > 29, `caret after ↓: ${downs}`);
       // native undo still works in other fields (Edit ▸ Undo falls back to the browser's)
       await key('Escape');
       await js(`const s = document.querySelector('#search'); s.focus(); document.execCommand('insertText', false, 'zzz')`);
@@ -420,7 +421,7 @@ app.on('browser-window-created', (_e, win) => {
       assert.strictEqual(await js(`[...${ed}.querySelectorAll('.fm')].map((e) => e.textContent).join('')`), '``');
       assert.strictEqual(await js(`${ed}.querySelector('code').spellcheck`), false);
       assert.ok(await js(`readText(${ed}) === editing.draft`));
-      // a fenced block: opener / inner / closer lines, no list or emphasis inside, language dimmed, whitespace kept
+      // a fenced block: opener / inner / closer lines, no list or emphasis inside, whitespace kept
       const block = 'a\n```js\n- not list\n\t**no**  x\n```\nb';
       await js(`document.execCommand('selectAll'); document.execCommand('insertText', false, ${JSON.stringify(block)})`);
       assert.deepStrictEqual(await js(`[...${ed}.children].map((l) => l.className)`),
@@ -428,7 +429,10 @@ app.on('browser-window-created', (_e, win) => {
       assert.strictEqual(await js(`${ed}.querySelectorAll('.cb strong, .cb .mk, .cb.li').length`), 0);
       assert.strictEqual(await js(`${ed}.querySelectorAll('.cb')[2].textContent`), '\t**no**  x');
       assert.strictEqual(await js(`${ed}.querySelector('.cb').spellcheck`), false);
-      assert.notStrictEqual(await style('.cb + .cb', 'color'), await style('.cb-first', 'color'));
+      assert.strictEqual(await js(`${ed}.querySelector('.cb-first').textContent === ${ed}.querySelector('.cb-first .fm').textContent`), true); // whole fence line hidden, no "js" label
+      // a long info string stays on one line, so the opener is as tall as a bare ```
+      const fenceH = async (t) => { await js(`document.execCommand('selectAll'); document.execCommand('insertText', false, ${JSON.stringify(t)})`); return js(`${ed}.querySelector('.cb-first').offsetHeight`); };
+      assert.strictEqual(await fenceH('```js ' + 'long words '.repeat(15) + '\ny\n```'), await fenceH('```\ny\n```'));
       assert.ok(/mono|menlo/i.test(await style('.cb', 'fontFamily')));
       assert.ok(await js(`readText(${ed}) === editing.draft`));
       // an unclosed fence is code to the end
@@ -483,22 +487,34 @@ app.on('browser-window-created', (_e, win) => {
       assert.strictEqual(await js(`const d = document.createElement('div'); d.innerHTML = renderMarkdown(${JSON.stringify(mid)}); d.querySelectorAll('.codeblock').length + ',' + d.querySelectorAll('li').length`), '0,2');
       assert.strictEqual(await js(`const d = document.createElement('div'); d.innerHTML = decorate(${JSON.stringify(mid)}); d.querySelectorAll('.cb').length + ',' + d.querySelectorAll('.li').length`), '0,2');
       assert.strictEqual(await js(`const d = document.createElement('div'); d.innerHTML = renderMarkdown('x\\n  \`\`\`py\\n  a = 1\\n\`\`\`\\n\\ny');
-        [d.firstChild.textContent, d.querySelector('.cb-head').textContent, d.querySelector('pre').textContent, d.lastChild.textContent].join('|')`), 'x|py|  a = 1|y');
+        [d.firstChild.textContent, d.querySelector('.codeblock').children.length, d.querySelector('pre').textContent, d.lastChild.textContent].join('|')`), 'x|1|  a = 1|y');
 
       // code markers are invisible in the editor but stay in the text
       const src = 'Fix `x`\n```js\nlet a = 1;\n```';
       assert.strictEqual(await js(`const d = document.createElement('div'); d.className = 'editor'; d.innerHTML = decorate(${JSON.stringify(src)});
         document.body.append(d); const c = (s) => getComputedStyle(d.querySelector(s)).color;
-        const r = [readText(d), c('code .fm'), c('.fence.cb-first .fm'), c('.fence:not(.cb-first) .fm'), d.querySelector('code').textContent].join('|');
-        d.remove(); r`), `${src}|rgba(0, 0, 0, 0)|rgba(0, 0, 0, 0)|rgba(0, 0, 0, 0)|\`x\``);
+        const r = [readText(d), c('code .fm'), c('.fence.cb-first .fm'), c('.fence:not(.cb-first) .fm'), d.querySelector('code').textContent,
+          d.querySelector('.fence.cb-first .fm').textContent].join('|');
+        d.remove(); r`), `${src}|rgba(0, 0, 0, 0)|rgba(0, 0, 0, 0)|rgba(0, 0, 0, 0)|\`x\`|\`\`\`js`); // no language label: "js" is hidden too
 
-      // Copy strips the fences (language tag included) and the inline backticks, code content kept
-      assert.strictEqual(await js(`plainText(${JSON.stringify(src)})`), 'Fix x\nlet a = 1;');
-      assert.strictEqual(await js(`plainText('a \`b\` c\\n\`\`\`\\nkeep \`this\`\\n\`\`\`')`), 'a b c\nkeep `this`');
+      // Copy copies the raw markdown: fences (language tag included) and inline backticks kept
       await js(`commitEdit(false); const p = state.prompts.find((q) => q.id === 'a'); p.doneAt = null; p.text = ${JSON.stringify(src)}; selectView(p.projectId); state.tab = 'pending'; render()`);
       await js(`${card('a')}.querySelector('[data-act=copy]').click()`);
       await wait(200);
-      assert.strictEqual(await clipboard.readText(), 'Fix x\nlet a = 1;');
+      assert.strictEqual(await clipboard.readText(), src);
+      // ⌘C in the editor: the raw markdown slice (also from inside a block)
+      const cp = (start, end) => js(`startEdit('a'); setSel(${ed}, { start: ${start}, end: ${end} }); const dt = new DataTransfer();
+        ${ed}.dispatchEvent(new ClipboardEvent('copy', { clipboardData: dt, bubbles: true, cancelable: true })); dt.getData('text/plain')`);
+      assert.strictEqual(await cp(0, src.length), src);
+      assert.strictEqual(await cp(14, src.length), src.slice(14));
+      await js(`commitEdit(false)`);
+      // a ``` run closed on the same line is inline code (any run length), not a fence
+      for (const [md, plain] of [['Run ```npm install``` now', 'Run npm install now'], ['```npm install```', 'npm install']]) {
+        assert.strictEqual(await js(`const d = document.createElement('div'); d.innerHTML = renderMarkdown(${JSON.stringify(md)});
+          [d.querySelectorAll('.codeblock').length, d.querySelector('code').textContent, d.textContent].join('|')`), `0|npm install|${plain}`);
+        assert.strictEqual(await js(`const d = document.createElement('div'); d.innerHTML = decorate(${JSON.stringify(md)});
+          [d.querySelectorAll('.cb').length, d.querySelector('code').textContent, readText(d)].join('|')`), `0|\`\`\`npm install\`\`\`|${md}`);
+      }
 
       // app menu: Format sits after Edit, and no two items share an accelerator
       const items = (m) => m.items.flatMap((i) => [i, ...(i.submenu ? items(i.submenu) : [])]);
@@ -548,6 +564,96 @@ app.on('browser-window-created', (_e, win) => {
       assert.ok(installed, 'clicking the update button must run the install path');
       assert.ok(!await js(`$('#update').disabled`), 'a refused install must re-enable the button');
       assert.ok((await js(`$('#update').textContent`)).includes('Update available'));
+
+      // edits save as you type; Copy while editing copies the current text and keeps the editor open; Esc keeps the text and closes
+      await js(`commitEdit(false); selectView('all'); state.tab = 'pending'; render(); startEdit('a')`);
+      await js(`const t = document.querySelector('.editor'); t.textContent = 'live \`draft\`  '; t.dispatchEvent(new Event('input'))`);
+      assert.strictEqual(byId(await until((d) => byId(d, 'a').text === 'live `draft`'), 'a').text, 'live `draft`');
+      assert.ok(await js(`const b = ${card('a')}.querySelector('[data-act=copy]'); const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+        b.dispatchEvent(down); b.click(); down.defaultPrevented`), 'mousedown on Copy must not blur the editor');
+      await wait(200);
+      assert.strictEqual(await clipboard.readText(), 'live `draft`');
+      assert.ok(await js(`editing && editing.id === 'a' && !!document.querySelector('.card.editing .editor')`));
+      await js(`document.querySelector('.editor').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+      await wait(300);
+      assert.ok(await js(`!editing && !document.querySelector('.editor')`));
+      assert.strictEqual(byId(read(), 'a').text, 'live `draft`');
+
+      // a click on a word in the preview puts the caret there (past emphasis markers and inline code), not at the end;
+      // also when another card's editor closes on mousedown and shifts the cards (mouse held down a moment)
+      const words = 'one **two** `x` three four five';
+      const low = await js(`const ids = [...document.querySelectorAll('.card')].map((c) => c.dataset.id); ids[ids.indexOf('a') + 1]`);
+      assert.ok(low, 'a card must follow a');
+      const clickFour = async (id, gap) => {
+        const pt = await js(`const n = [...${card(id)}.querySelector('.body').childNodes].pop(); const r = document.createRange(); r.setStart(n, n.data.indexOf('four') + 1); r.setEnd(n, n.data.indexOf('four') + 2);
+          const b = r.getBoundingClientRect(); [Math.round(b.left + 1), Math.round(b.top + b.height / 2)]`);
+        win.webContents.focus();
+        win.webContents.sendInputEvent({ type: 'mouseMove', x: pt[0], y: pt[1] });
+        win.webContents.sendInputEvent({ type: 'mouseDown', x: pt[0], y: pt[1], button: 'left', clickCount: 1 });
+        await wait(gap);
+        win.webContents.sendInputEvent({ type: 'mouseUp', x: pt[0], y: pt[1], button: 'left', clickCount: 1 });
+        await wait(300);
+        assert.deepStrictEqual(await js(`[editing && editing.id, editing.caret, selOf(${ed}).start, editing.hist.stack[editing.hist.i].sel.start]`), [id, ...Array(3).fill(words.indexOf('four') + 1)]);
+        await js(`commitEdit(true)`);
+      };
+      await js(`for (const p of state.prompts) if (p.id === 'a' || p.id === ${JSON.stringify(low)}) p.text = ${JSON.stringify(words)}; render()`);
+      await clickFour('a', 0);
+      await js(`startEdit('a')`);
+      await clickFour(low, 150); // below the open editor
+      await js(`startEdit(${JSON.stringify(low)})`);
+      await clickFour('a', 150); // above the open editor
+
+      // a card drag ends without a mouseup (the browser fires dragstart/dragend instead), so the press on the card
+      // must not open its editor on the next click elsewhere
+      await js(`const b = ${card('a')}.querySelector('.body'), r = b.getBoundingClientRect();
+        b.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: r.left + 10, clientY: r.top + 10 }));
+        b.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: new DataTransfer() })); b.dispatchEvent(new DragEvent('dragend', { bubbles: true }))`);
+      const search = await js(`const r = document.querySelector('#search').getBoundingClientRect(); [Math.round(r.left + 10), Math.round(r.top + r.height / 2)]`);
+      win.webContents.focus();
+      win.webContents.sendInputEvent({ type: 'mouseMove', x: search[0], y: search[1] });
+      win.webContents.sendInputEvent({ type: 'mouseDown', x: search[0], y: search[1], button: 'left', clickCount: 1 });
+      win.webContents.sendInputEvent({ type: 'mouseUp', x: search[0], y: search[1], button: 'left', clickCount: 1 });
+      await wait(300);
+      assert.deepStrictEqual(await js(`[editing, document.activeElement.id]`), [null, 'search']);
+
+      // ⌘Z after closing the editor (nothing focused) reopens the last edited prompt and undoes there
+      const textOf = async (id) => byId(read(), id).text;
+      await js(`document.activeElement.blur(); state.prompts.forEach((p) => { if (p.id === 'a' || p.id === 'b') p.doneAt = null; }); selectView(state.prompts.find((p) => p.id === 'b').projectId)`);
+      const [ta, tb] = [await textOf('a'), await textOf('b')];
+      await js(`startEdit('a'); setSel(${ed}, { start: 0, end: 0 })`);
+      win.webContents.focus(); // real keys: execCommand fires no beforeinput, which undo uses to put the caret back
+      for (const c of 'A1 ') win.webContents.sendInputEvent({ type: 'char', keyCode: c });
+      await key('Escape');
+      await until((d) => byId(d, 'a').text === `A1 ${ta}`);
+      await cmd('undo');
+      assert.deepStrictEqual(await js(`[editing?.id, state.view, selOf(${ed}).start]`), ['a', byId(read(), 'a').projectId, 0]);
+      await until((d) => byId(d, 'a').text === ta);
+      await cmd('redo');
+      await until((d) => byId(d, 'a').text === `A1 ${ta}`);
+      // opening B to read and closing it without typing keeps A as the prompt ⌘Z goes back to
+      await key('Escape');
+      await js(`startEdit('b')`);
+      await key('Escape');
+      await cmd('undo');
+      await until((d) => byId(d, 'a').text === ta);
+      assert.strictEqual(await textOf('b'), tb);
+      await cmd('redo');
+      await until((d) => byId(d, 'a').text === `A1 ${ta}`);
+      // while editing B, ⌘Z never touches A
+      await key('Escape');
+      await js(`startEdit('b'); setSel(${ed}, { start: 0, end: 0 })`);
+      await type('B1 ');
+      await until((d) => byId(d, 'b').text === `B1 ${tb}`);
+      await cmd('undo');
+      await until((d) => byId(d, 'b').text === tb);
+      assert.strictEqual(await textOf('a'), `A1 ${ta}`);
+      // reopening A resumes its history: ⌘Z undoes the previous session's edit
+      await key('Escape');
+      await js(`startEdit('a')`);
+      await cmd('undo');
+      await until((d) => byId(d, 'a').text === ta);
+      assert.strictEqual(await textOf('b'), tb);
+      await key('Escape');
 
       console.log('SMOKE OK');
       app.exit(0);

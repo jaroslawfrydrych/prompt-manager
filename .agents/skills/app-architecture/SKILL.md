@@ -64,7 +64,7 @@ state = {
 }
 ```
 
-- UI-only state lives in module variables, not in `state`: `editing` (`{ id, draft, isNew, caret, hist }`),
+- UI-only state lives in module variables, not in `state`: `editing` (`{ id, draft, orig, isNew, caret, hist, at }`; `at` is the preview click point `mountEditor` hit-tests once, with emphasis markers hidden, to place the caret; every edit is saved to the prompt as you type via `saveDraft`, `orig` is what an emptied existing prompt falls back to; Esc and ⌘↩ both just close the editor),
   `renaming` (project id), `query`.
 - IDs come from `uid()`. Timestamps are `Date.now()` numbers.
 - Changing the shape: increment `version`, migrate older files in the load IIFE (see the v1 → v2 sort),
@@ -99,12 +99,13 @@ Rules that follow from the full rebuild:
 
 ## Markdown and the editor
 
-`renderMarkdown` supports fenced ```` ``` ```` blocks (with a language label and a copy button; a fence is a line
-starting with ```` ``` ```` after optional spaces, the `FENCE` rule that `decorate`, `inFence`, `renumber` and
+`renderMarkdown` supports fenced ```` ``` ```` blocks (rendered as the code content only, no header, label or copy button; a fence is a line
+starting with ```` ``` ```` after optional spaces with no backtick after it, the `FENCE` rule that `decorate`, `inFence`, `renumber` and
 `fmtRuns` use too, so a ```` ``` ```` mid-line is never a block, and an unclosed fence runs to the end),
-`` `inline code` ``, `-` / `*` / `1.` / `1)` lists nested by indentation (2 spaces per level), and `**bold**`,
+`` `inline code` `` (`CODE`: any backtick run closed by an equal one, so ```` ```x``` ```` alone on a line is inline code), `-` / `*` / `1.` / `1)` lists nested by indentation (2 spaces per level), and `**bold**`,
 `*italic*` / `_italic_` and `<u>underline</u>` (`inline(text, keep)` → `emphasis`). Keep it small; prompts are pasted
-into agents as plain text. Emphasis runs on **escaped** text (so `<u>` is only the literal tag pair, never other HTML),
+into agents as plain text, and every copy (Copy, ⌘C / ⌘X in the editor) is the raw markdown, fences and backticks
+included. Emphasis runs on **escaped** text (so `<u>` is only the literal tag pair, never other HTML),
 never crosses a line, skips inline code and fences and lines over 2000 chars, and `*` / `_` only count at word
 edges (an opener never follows a digit, `/` or `.`, nor a letter for `_`, and a `*` opener follows a letter only
 when a letter or digit comes next, so `README*, LICENSE*` stays plain; a closer is never followed by a letter or
@@ -118,8 +119,11 @@ line, decorated by `decorate(src)` (escaped text in spans). Its text (`readText(
 the stored format stays a plain markdown string. On `input` the changed lines are re-decorated (`paint`) and the
 selection is restored by plain-text offset (`selOf` / `setSel`); nothing is touched during IME composition.
 Rewriting the DOM breaks native undo, so the editor keeps its own stack in `editing.hist` (capped at 200 steps).
-Edit ▸ Undo / Redo (⌘Z / ⇧⌘Z) are therefore not native roles: they send the `'undo'` / `'redo'` command, which
-runs `undoRedo` in the editor and `document.execCommand` in any other field. Edits made by key handling (Enter, Tab,
+The stack is per prompt and lives for the app session in `hists` (Map id → hist, not saved; `dropPrompts` deletes
+it with the prompt), so reopening a prompt resumes its undo / redo. Edit ▸ Undo / Redo (⌘Z / ⇧⌘Z) are therefore not
+native roles: they send the `'undo'` / `'redo'` command, which runs `undoRedo` in the open editor (only ever its
+prompt), `document.execCommand` in any other focused field (search, rename), and with nothing focused and no editor
+open `undoClosed`: it reopens `lastEdited`, the prompt whose text last changed (set in `record` / `undoRedo`, not by opening or closing), switching view / tab if needed, and undoes there, caret at the change. Edits made by key handling (Enter, Tab,
 paste, cut) go through `applyEdit` as pure `(text, selection) → [text, selection]` functions such as `enterEdit` and
 `tabEdit` (and `backEdit`: Backspace after a marker outdents / removes it); list edits end with `renumber`, which
 keeps numbered siblings consecutive and never touches lines inside a ```` ``` ```` fence. Format ▸ Bold / Italic /
@@ -133,16 +137,18 @@ pass runs before the `*` passes). Native edits (`sync`) and paste / cut (`replac
 renumbers only when the edit changed the line count, so a retyped number sticks. Code is decorated too: inline
 code via `inline(text, true)` is a `<code spellcheck="false">` whose `.fm` backticks sit inside the pill and are
 transparent, and every line of a fenced block (fences included) is a `.ln.cb` div with `spellcheck="false"`, never
-list or emphasis decorated; fence lines also get `.fence` (their ``` ``` ``` is transparent, the closer is drawn as the
-block's bottom bar); `.cb-first` is the opener (drawn like the preview's header), `.cb-last` the closer or, while unclosed, the
-last line, so the lines together look like the preview's `.codeblock`. In a block `enterEdit` keeps the line's
+list or emphasis decorated; fence lines also get `.fence` (10px tall: they are the block's top / bottom padding, the whole
+line, ``` ``` ``` and any text after it, transparent, so a block never shows a language label); `.cb-first` is the opener, `.cb-last` the closer or, while unclosed, the
+last line, so the lines together look exactly like the preview's `.codeblock` (no header, only the code); the preview drops
+blank lines next to a block, so one blank line right before an opener or after a closer is a 10px `.gap` line (the block's margin). Code, inline code and
+list rules are shared between `.body` and `.editor` in `styles.css` so toggling the editor moves nothing (smoke checks it). In a block `enterEdit` keeps the line's
 indentation (not on ⇧↩), and ↩ at the end of an opener nothing closes yet inserts the closing fence (one undo
 step); ↩ after a typed closer directly above another bare closer steps over it (the duplicate goes, caret on the
-line after) unless that bare line opens a following block. List lines hang after their marker: the marker is plain
-inline monospace text (never `inline-block`, which breaks ↑/↓ columns) and the line gets
-a `.w<n>` class (marker length) that sets `padding-left` and a negative `text-indent`. The line also carries
-`ul`/`ol` and `l<n>` (nesting level) so CSS draws the preview's bullet (disc, circle, square) over the
-transparent `-` / `*` with a zero-width `::before`, leaving the text raw markdown.
+line after) unless that bare line opens a following block. List lines hang at the preview's indent (1.5em per
+level, `l<n>`): the marker is plain inline monospace text (never `inline-block`, which breaks ↑/↓ columns), transparent,
+letter-spaced by its length (`.w<n>`) to fill that indent. The line also carries `ul`/`ol` (and `data-n`, the number)
+so a zero-width `::before` draws the preview's `::marker` text (`• ` / `◦ ` / `▪ ` by level, the preview sets the same
+glyphs, or `1. `) right-aligned at the text start, leaving the text raw markdown.
 
 ## Styling
 
