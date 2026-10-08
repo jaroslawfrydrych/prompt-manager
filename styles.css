@@ -292,9 +292,9 @@ button.chip:hover { background: var(--fill-3); color: var(--text); }
 .editor code .fm, .editor .fence .fm { color: transparent; }
 .editor.hit :not(code, .fence) > .fm { display: none; } /* mountEditor's click hit test */
 /* Fenced code: each line of the block is a .cb line div, together drawn as the preview's .codeblock.
-   The fence lines are its 10px top and bottom padding (``` transparent, the language dimmed and small). */
+   The fence lines are its 10px top and bottom padding (the whole line, ``` and any text after it, transparent). */
 .editor .cb { padding: 0 12px; border-block-width: 0; }
-.editor .fence { font-size: 9px; line-height: 10px; color: var(--text-3); }
+.editor .fence { font-size: 9px; line-height: 10px; white-space: pre; overflow: hidden; } /* a long info string can't wrap and grow the padding */
 .editor .cb-first { margin-top: 10px; border-top-width: 1px; border-radius: 8px 8px 0 0; }
 .editor .cb-last { margin-bottom: 10px; border-bottom-width: 1px; border-radius: 0 0 8px 8px; }
 .editor .cb-last:not(.fence) { padding-bottom: 10px; }

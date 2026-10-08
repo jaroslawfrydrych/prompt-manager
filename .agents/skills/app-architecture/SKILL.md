@@ -134,8 +134,8 @@ pass runs before the `*` passes). Native edits (`sync`) and paste / cut (`replac
 renumbers only when the edit changed the line count, so a retyped number sticks. Code is decorated too: inline
 code via `inline(text, true)` is a `<code spellcheck="false">` whose `.fm` backticks sit inside the pill and are
 transparent, and every line of a fenced block (fences included) is a `.ln.cb` div with `spellcheck="false"`, never
-list or emphasis decorated; fence lines also get `.fence` (10px tall: they are the block's top / bottom padding, their ``` ``` ``` transparent,
-the language small and dimmed); `.cb-first` is the opener, `.cb-last` the closer or, while unclosed, the
+list or emphasis decorated; fence lines also get `.fence` (10px tall: they are the block's top / bottom padding, the whole
+line, ``` ``` ``` and any text after it, transparent, so a block never shows a language label); `.cb-first` is the opener, `.cb-last` the closer or, while unclosed, the
 last line, so the lines together look exactly like the preview's `.codeblock` (no header, only the code); the preview drops
 blank lines next to a block, so one blank line right before an opener or after a closer is a 10px `.gap` line (the block's margin). Code, inline code and
 list rules are shared between `.body` and `.editor` in `styles.css` so toggling the editor moves nothing (smoke checks it). In a block `enterEdit` keeps the line's

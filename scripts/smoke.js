@@ -29,6 +29,9 @@ async function until(check) {
 }
 
 app.on('browser-window-created', (_e, win) => {
+  // the physical cursor must not inject mousemoves between the synthetic mouseDown/mouseUp below (a click would
+  // become a selection drag); sendInputEvent still reaches the page
+  win.setIgnoreMouseEvents(true);
   win.webContents.on('console-message', (e) => console.log('renderer:', e.message));
   win.webContents.once('did-finish-load', async () => {
     const js = (c) => win.webContents.executeJavaScript(c.includes(';') ? `{ ${c} }` : c);
@@ -418,7 +421,7 @@ app.on('browser-window-created', (_e, win) => {
       assert.strictEqual(await js(`[...${ed}.querySelectorAll('.fm')].map((e) => e.textContent).join('')`), '``');
       assert.strictEqual(await js(`${ed}.querySelector('code').spellcheck`), false);
       assert.ok(await js(`readText(${ed}) === editing.draft`));
-      // a fenced block: opener / inner / closer lines, no list or emphasis inside, language dimmed, whitespace kept
+      // a fenced block: opener / inner / closer lines, no list or emphasis inside, whitespace kept
       const block = 'a\n```js\n- not list\n\t**no**  x\n```\nb';
       await js(`document.execCommand('selectAll'); document.execCommand('insertText', false, ${JSON.stringify(block)})`);
       assert.deepStrictEqual(await js(`[...${ed}.children].map((l) => l.className)`),
@@ -426,7 +429,10 @@ app.on('browser-window-created', (_e, win) => {
       assert.strictEqual(await js(`${ed}.querySelectorAll('.cb strong, .cb .mk, .cb.li').length`), 0);
       assert.strictEqual(await js(`${ed}.querySelectorAll('.cb')[2].textContent`), '\t**no**  x');
       assert.strictEqual(await js(`${ed}.querySelector('.cb').spellcheck`), false);
-      assert.notStrictEqual(await style('.cb + .cb', 'color'), await style('.cb-first', 'color'));
+      assert.strictEqual(await js(`${ed}.querySelector('.cb-first').textContent === ${ed}.querySelector('.cb-first .fm').textContent`), true); // whole fence line hidden, no "js" label
+      // a long info string stays on one line, so the opener is as tall as a bare ```
+      const fenceH = async (t) => { await js(`document.execCommand('selectAll'); document.execCommand('insertText', false, ${JSON.stringify(t)})`); return js(`${ed}.querySelector('.cb-first').offsetHeight`); };
+      assert.strictEqual(await fenceH('```js ' + 'long words '.repeat(15) + '\ny\n```'), await fenceH('```\ny\n```'));
       assert.ok(/mono|menlo/i.test(await style('.cb', 'fontFamily')));
       assert.ok(await js(`readText(${ed}) === editing.draft`));
       // an unclosed fence is code to the end
@@ -487,8 +493,9 @@ app.on('browser-window-created', (_e, win) => {
       const src = 'Fix `x`\n```js\nlet a = 1;\n```';
       assert.strictEqual(await js(`const d = document.createElement('div'); d.className = 'editor'; d.innerHTML = decorate(${JSON.stringify(src)});
         document.body.append(d); const c = (s) => getComputedStyle(d.querySelector(s)).color;
-        const r = [readText(d), c('code .fm'), c('.fence.cb-first .fm'), c('.fence:not(.cb-first) .fm'), d.querySelector('code').textContent].join('|');
-        d.remove(); r`), `${src}|rgba(0, 0, 0, 0)|rgba(0, 0, 0, 0)|rgba(0, 0, 0, 0)|\`x\``);
+        const r = [readText(d), c('code .fm'), c('.fence.cb-first .fm'), c('.fence:not(.cb-first) .fm'), d.querySelector('code').textContent,
+          d.querySelector('.fence.cb-first .fm').textContent].join('|');
+        d.remove(); r`), `${src}|rgba(0, 0, 0, 0)|rgba(0, 0, 0, 0)|rgba(0, 0, 0, 0)|\`x\`|\`\`\`js`); // no language label: "js" is hidden too
 
       // Copy copies the raw markdown: fences (language tag included) and inline backticks kept
       await js(`commitEdit(false); const p = state.prompts.find((q) => q.id === 'a'); p.doneAt = null; p.text = ${JSON.stringify(src)}; selectView(p.projectId); state.tab = 'pending'; render()`);
@@ -581,6 +588,7 @@ app.on('browser-window-created', (_e, win) => {
         const pt = await js(`const n = [...${card(id)}.querySelector('.body').childNodes].pop(); const r = document.createRange(); r.setStart(n, n.data.indexOf('four') + 1); r.setEnd(n, n.data.indexOf('four') + 2);
           const b = r.getBoundingClientRect(); [Math.round(b.left + 1), Math.round(b.top + b.height / 2)]`);
         win.webContents.focus();
+        win.webContents.sendInputEvent({ type: 'mouseMove', x: pt[0], y: pt[1] });
         win.webContents.sendInputEvent({ type: 'mouseDown', x: pt[0], y: pt[1], button: 'left', clickCount: 1 });
         await wait(gap);
         win.webContents.sendInputEvent({ type: 'mouseUp', x: pt[0], y: pt[1], button: 'left', clickCount: 1 });
@@ -602,6 +610,7 @@ app.on('browser-window-created', (_e, win) => {
         b.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: new DataTransfer() })); b.dispatchEvent(new DragEvent('dragend', { bubbles: true }))`);
       const search = await js(`const r = document.querySelector('#search').getBoundingClientRect(); [Math.round(r.left + 10), Math.round(r.top + r.height / 2)]`);
       win.webContents.focus();
+      win.webContents.sendInputEvent({ type: 'mouseMove', x: search[0], y: search[1] });
       win.webContents.sendInputEvent({ type: 'mouseDown', x: search[0], y: search[1], button: 'left', clickCount: 1 });
       win.webContents.sendInputEvent({ type: 'mouseUp', x: search[0], y: search[1], button: 'left', clickCount: 1 });
       await wait(300);

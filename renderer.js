@@ -197,12 +197,11 @@ function decorate(src) {
     if (fence && isFence) closer = i;
     const code = fence || isFence; // fences and the code between them are left unformatted
     if (code) {
-      // A block like the preview's: .cb-first is the opener (its ``` transparent, the language small and dimmed),
-      // .cb-last the closer, or the last line while the fence is still open.
+      // A block like the preview's: .cb-first is the opener, .cb-last the closer, or the last line while the fence is still open.
       const cls = `${isFence ? ' fence' : ''}${!fence ? ' cb-first' : ''}${(fence && isFence) || i === all.length - 1 ? ' cb-last' : ''}`;
       if (isFence) fence = !fence;
-      // The ``` of a fence line is invisible (CSS): the line is drawn as the block's top / bottom edge.
-      const body = isFence ? line.replace(/^( *)(`{3,})(.*)/, (x, ind, tick, rest) => `${ind}<span class="fm">${tick}</span>${esc(rest)}`)
+      // A fence line (``` and any text after it) is invisible (CSS): the line is drawn as the block's top / bottom edge.
+      const body = isFence ? `<span class="fm">${esc(line)}</span>`
         : !line ? '<br>' : esc(line);
       return `<div class="ln cb${cls}" spellcheck="false">${body}</div>`;
     }
