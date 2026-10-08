@@ -29,7 +29,7 @@ Prompt Manager is where those prompts wait their turn.
 
 - **One queue per project.** A Mail-style sidebar lists your projects, each with its pending count.
   **All** shows prompts from every project, **Flagged** only the flagged ones.
-- **Prompts are plain text.** Click a prompt to edit it, `⌘↩` to save. Spelling is checked as you type; right-click a word for suggestions. Fenced ```` ``` ```` code blocks, `` `inline code` `` and `-` / `1.` lists are rendered,
+- **Prompts are plain text.** Click a prompt to edit it; changes are saved as you type, `⌘↩` closes the editor. Spelling is checked as you type; right-click a word for suggestions. Fenced ```` ``` ```` code blocks, `` `inline code` `` and `-` / `1.` lists are rendered,
   and every code block has its own copy button (a fence must start a line: ```` ``` ```` mid-line is not a code block). Code shows as code while you type too: in a block `↩` keeps the line's indentation,
   and ```` ``` ```` + `↩` adds the closing fence. `**bold**`, `*italic*` and `<u>underline</u>` show formatted as you type
   (the markers stay visible, dimmed); `⌘B` / `⌘I` / `⌘U` toggle them on the selection. Lists are formatted live while you type: `↩` continues a list
@@ -67,7 +67,7 @@ The app is not notarized by Apple, so macOS will block the first launch. To open
 | `⇧⌘N` | New project |
 | `⌘1`–`⌘9` / `⌘0` | Jump to project / All |
 | `⌘F` | Search |
-| `⌘↩` / `Esc` | Save / cancel editing |
+| `⌘↩` / `Esc` | Close the editor / revert the edit |
 | `⇥` / `⇧⇥` | Indent / outdent a list item while editing |
 | `⌘B` / `⌘I` / `⌘U` | Bold / italic / underline the selection while editing |
 | `⌥`-click **Copy** | Copy and mark as done |

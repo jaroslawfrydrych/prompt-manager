@@ -20,7 +20,7 @@ const ICONS = {
 };
 
 let state = { version: 2, projects: [], prompts: [], view: 'all', tab: 'pending' };
-let editing = null; // { id, draft, isNew, caret, hist }
+let editing = null; // { id, draft, orig, isNew, caret, hist }
 let renaming = null; // project id
 let query = '';
 
@@ -327,8 +327,18 @@ function record(text, sel, kind, before) {
 function show(ed, text, sel) {
   editing.draft = text;
   editing.caret = sel.start;
+  saveDraft();
   paint(ed, text);
   setSel(ed, sel);
+}
+
+// Edits are saved as you type. An emptied prompt keeps its old text (delete is explicit).
+function saveDraft() {
+  const p = state.prompts.find((x) => x.id === editing.id);
+  if (!p) return;
+  const text = editing.draft.replace(/\s+$/, '');
+  p.text = text.trim() ? text : editing.orig;
+  persist();
 }
 
 // Edits made by our own key handling (Enter, Tab, paste, cut) are one undo step each.
@@ -766,6 +776,7 @@ function mountEditor(ed) {
     record(text, sel, kind, before);
     editing.draft = text;
     editing.caret = sel.start;
+    saveDraft();
     if (paint(ed, text) || text !== read) setSel(ed, sel);
   };
   ed.addEventListener('beforeinput', (e) => {
@@ -906,7 +917,7 @@ function cardHtml(p) {
   const doneLabel = p.doneAt ? `done ${ago(p.doneAt)}` : '';
   const body = isEditing
     ? `<div class="editor" contenteditable="plaintext-only" spellcheck="true" role="textbox" aria-multiline="true" data-placeholder="What are we working on?"></div>
-       <div class="edit-hint"><span><kbd>⌘</kbd><kbd>↩</kbd> save</span> · <span><kbd>esc</kbd> cancel</span> · <span><code>\`code\`</code> <code>\`\`\`block\`\`\`</code></span> <span><code>- list</code> <code>1. list</code> <kbd>⇥</kbd> nest</span> · <span><kbd>⌘B</kbd> <kbd>⌘I</kbd> <kbd>⌘U</kbd> format</span></div>`
+       <div class="edit-hint"><span>saved as you type</span> · <span><kbd>⌘</kbd><kbd>↩</kbd> done</span> · <span><kbd>esc</kbd> revert</span> · <span><code>\`code\`</code> <code>\`\`\`block\`\`\`</code></span> <span><code>- list</code> <code>1. list</code> <kbd>⇥</kbd> nest</span> · <span><kbd>⌘B</kbd> <kbd>⌘I</kbd> <kbd>⌘U</kbd> format</span></div>`
     : `<div class="body">${renderMarkdown(p.text)}</div>`;
 
   const draggable = !isEditing && !p.doneAt ? ' draggable="true"' : '';
@@ -1000,7 +1011,7 @@ function newPrompt() {
   // In Flagged, a new prompt is born flagged so it stays in view (like Reminders).
   const p = { id: uid(), projectId, text: '', createdAt: Date.now(), doneAt: null, flag: state.view === 'flagged' ? 'red' : null };
   state.prompts.unshift(p);
-  editing = { id: p.id, draft: '', isNew: true };
+  editing = { id: p.id, draft: '', orig: '', isNew: true };
   state.tab = 'pending';
   query = '';
   $('#search').value = '';
@@ -1012,20 +1023,20 @@ function startEdit(id) {
   if (editing && editing.id === id) return;
   if (editing) commitEdit(false);
   const p = state.prompts.find((x) => x.id === id);
-  editing = { id, draft: p.text, isNew: false };
+  editing = { id, draft: p.text, orig: p.text, isNew: false };
   render();
 }
 
 function commitEdit(rerender = true, cancel = false) {
   if (!editing) return;
-  const { id, draft, isNew } = editing;
+  if (!cancel) saveDraft(); // catches a draft typed mid-IME composition
+  const { id, orig, isNew } = editing;
   editing = null;
   const p = state.prompts.find((x) => x.id === id);
   if (p) {
-    const text = cancel ? p.text : draft.replace(/\s+$/, '');
-    // Empty new prompt is discarded; clearing an existing one keeps the old text (delete is explicit).
-    if (text.trim()) p.text = text;
-    else if (isNew) state.prompts = state.prompts.filter((x) => x.id !== id);
+    if (cancel) p.text = orig;
+    // An empty new prompt is discarded.
+    if (isNew && !p.text.trim()) state.prompts = state.prompts.filter((x) => x.id !== id);
   }
   persist();
   if (rerender) render();
@@ -1274,6 +1285,8 @@ $('#list').addEventListener('click', (e) => {
   // Click on text enters edit mode, unless the user is selecting text.
   if (p && e.target.closest('.body') && window.getSelection().isCollapsed) startEdit(p.id);
 });
+// Copy works while editing: keep the editor focused so its blur does not close it and re-render the button away.
+$('#list').addEventListener('mousedown', (e) => { if (e.target.closest('.card.editing [data-act=copy]')) e.preventDefault(); });
 $('#list').addEventListener('contextmenu', (e) => {
   const card = e.target.closest('.card');
   const p = card && state.prompts.find((x) => x.id === card.dataset.id);
