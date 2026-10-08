@@ -47,7 +47,19 @@ window.addEventListener('beforeunload', () => {
 // ---------- markdown: ``` blocks, `inline` code, lists, **bold**, *italic*, <u>underline</u> ----------
 
 const LIST = /^( *)([-*]|\d+[.)]) /; // indent, marker
-const FENCE = /^ *```/;
+// A fence line: 3+ backticks (each one toggles; run lengths are not matched) after optional spaces, and no backtick
+// after them (CommonMark's info string rule), so ```npm install``` on its own line is inline code, not a block.
+const FENCE = /^ *`{3,}[^`\n]*$/;
+const fences = (s) => (s.match(new RegExp(FENCE.source, 'gm')) || []).length;
+// Inline code: a backtick run, then the same run closing it (`x`, ``x``, ```x```), never part of a longer run.
+const CODE = /(?<!`)(`+)([^`\n]+?)\1(?!`)/g;
+// text / code span pieces, alternating (text first), like split() with a capture group
+function codeSplit(s) {
+  const out = [];
+  let at = 0;
+  for (const m of s.matchAll(CODE)) { out.push(s.slice(at, m.index), m[0]); at = m.index + m[0].length; }
+  return [...out, s.slice(at)];
+}
 
 // Emphasis runs on escaped text, so <u> is only ever the literal tag pair, never other HTML.
 // Each pass swaps its markers for private-use placeholders (odd = open, even = close) so later
@@ -105,10 +117,11 @@ function emphasis(html, keep) {
 // Inline code is never formatted; in the editor (keep) its backticks stay in the text inside the pill,
 // invisible (CSS) so they read as its padding, and it is not spell checked (identifiers would all be underlined).
 function inline(text, keep) {
-  return text.split(/(`[^`\n]+`)/).map((s, i) => {
+  return codeSplit(text).map((s, i) => {
     if (i % 2 === 0) return emphasis(esc(s), keep);
-    const code = esc(s.slice(1, -1));
-    return keep ? `<code spellcheck="false"><span class="fm">\`</span>${code}<span class="fm">\`</span></code>` : `<code>${code}</code>`;
+    const t = /^`+/.exec(s)[0];
+    const code = esc(s.slice(t.length, -t.length));
+    return keep ? `<code spellcheck="false"><span class="fm">${t}</span>${code}<span class="fm">${t}</span></code>` : `<code>${code}</code>`;
   }).join('');
 }
 
@@ -168,14 +181,16 @@ function renderMarkdown(src) {
   return out + blocks(text.join('\n'));
 }
 
+const MD = 'text/x-prompt-markdown'; // clipboard type carrying the editor's raw markdown between its own copy and paste
+
 // The markdown code markers are not part of the code, so Copy drops fence lines (language tag
 // included) and inline-code backticks. Lines inside a block are code and stay as they are.
-function plainText(src) {
-  let fence = false;
+// `fence` says whether src starts inside a block (a selection copied from the editor).
+function plainText(src, fence = false) {
   const out = [];
   for (const line of src.split('\n')) {
     if (FENCE.test(line)) { fence = !fence; continue; }
-    out.push(fence ? line : line.replace(/`([^`\n]+)`/g, '$1'));
+    out.push(fence ? line : line.replace(CODE, '$2'));
   }
   return out.join('\n');
 }
@@ -198,7 +213,7 @@ function decorate(src) {
       const cls = `${isFence ? ' fence' : ''}${!fence ? ' cb-first' : ''}${(fence && isFence) || i === all.length - 1 ? ' cb-last' : ''}`;
       if (isFence) fence = !fence;
       // The ``` of a fence line is invisible (CSS): the line is drawn as the block's top / bottom edge.
-      const body = isFence ? line.replace(/^( *)(```)(.*)/, (x, ind, tick, rest) => `${ind}<span class="fm">${tick}</span>${esc(rest)}`)
+      const body = isFence ? line.replace(/^( *)(`{3,})(.*)/, (x, ind, tick, rest) => `${ind}<span class="fm">${tick}</span>${esc(rest)}`)
         : !line ? '<br>' : esc(line);
       return `<div class="ln cb${cls}" spellcheck="false">${body}</div>`;
     }
@@ -341,7 +356,7 @@ function undoRedo(ed, dir) {
   show(ed, h.stack[h.i].text, h.stack[h.i].sel);
 }
 
-const inFence = (text, at) => (text.slice(0, at).match(/^ *```/gm) || []).length % 2 === 1;
+const inFence = (text, at) => fences(text.slice(0, at)) % 2 === 1;
 
 // Enter: a list item continues the list (next number for numbered ones); an empty item ends it.
 function enterEdit(text, { start, end }, plain) {
@@ -352,7 +367,7 @@ function enterEdit(text, { start, end }, plain) {
   const fenced = inFence(text, ls);
   // ``` + ↩ (not ⇧↩) at the end of an opener that nothing closes yet adds the closing fence, caret on the line between.
   if (!plain && !fenced && start === le && /^ *```[\w+#.-]*$/.test(line)
-    && (text.slice(le).match(/^ *```/gm) || []).length % 2 === 0) {
+    && fences(text.slice(le)) % 2 === 0) {
     const ind = /^ */.exec(line)[0];
     return [`${text.slice(0, le)}\n${ind}\n${ind}\`\`\`${text.slice(le)}`, { start: le + 1 + ind.length, end: le + 1 + ind.length }];
   }
@@ -362,7 +377,7 @@ function enterEdit(text, { start, end }, plain) {
   const nl = text.indexOf('\n', le + 1);
   if (!plain && fenced && start === le && /^ *```$/.test(line) && le < text.length
     && /^ *```$/.test(text.slice(le + 1, nl < 0 ? text.length : nl))
-    && (text.slice(nl < 0 ? text.length : nl).match(/^ *```/gm) || []).length % 2 === 0) {
+    && fences(text.slice(nl < 0 ? text.length : nl)) % 2 === 0) {
     const rest = nl < 0 ? '\n' : text.slice(nl);
     return [text.slice(0, le) + rest, { start: le + 1, end: le + 1 }];
   }
@@ -418,7 +433,7 @@ function renumber(text, { start, end }) {
   let de = 0;
   let fenced = false;
   lines.forEach((line, i) => {
-    if (/^ *```/.test(line)) fenced = !fenced;
+    if (FENCE.test(line)) fenced = !fenced;
     const m = !fenced && i >= a && i <= b && LIST.exec(line);
     if (m) {
       const d = m[1].length;
@@ -484,7 +499,7 @@ function emRuns(line) {
   const out = [];
   const m = LIST.exec(line);
   let r = m ? m[0].length : 0;
-  line.slice(r).split(/(`[^`\n]+`)/).forEach((s, i) => {
+  codeSplit(line.slice(r)).forEach((s, i) => {
     const h = i % 2 ? null : marks(esc(s));
     if (!h) { r += s.length; return; }
     const open = [];
@@ -511,7 +526,7 @@ function emRuns(line) {
 }
 
 // Does a..b overlap a `code` span of the line? With a === b: is the caret strictly inside one?
-const inCode = (line, a, b = a) => [...line.matchAll(/`[^`\n]+`/g)].some((m) => m.index < b && a < m.index + m[0].length);
+const inCode = (line, a, b = a) => [...line.matchAll(CODE)].some((m) => m.index < b && a < m.index + m[0].length);
 
 // ⌘B / ⌘I / ⌘U, like Notes: each selected line is formatted on its own (past the list marker, without the
 // whitespace at the edges, never in code). When every part already sits in a run of that kind the runs are
@@ -601,7 +616,7 @@ function fmtRuns(text, { start, end }, kind, [o, c] = WRAP[kind]) {
     // Code spans can't be formatted, and a run can't cross one (inline() formats each side on its own),
     // so each gap between the spans is a part of its own.
     const gaps = [];
-    for (const g of l.line.matchAll(/`[^`\n]+`/g)) {
+    for (const g of l.line.matchAll(CODE)) {
       gaps.push([a, Math.min(b, l.ls + g.index)]);
       a = Math.max(a, l.ls + g.index + g[0].length);
     }
@@ -705,7 +720,7 @@ function fmtRuns(text, { start, end }, kind, [o, c] = WRAP[kind]) {
 // Marker chars a line shows as plain text (past its list marker, outside code).
 function literals(line) {
   const m = LIST.exec(line);
-  return line.slice(m ? m[0].length : 0).split(/(`[^`\n]+`)/)
+  return codeSplit(line.slice(m ? m[0].length : 0))
     .reduce((n, s, i) => n + (i % 2 ? 0 : ((marks(esc(s)) || esc(s)).match(/\*|_|&lt;\/?u&gt;/g) || []).length), 0);
 }
 
@@ -772,15 +787,17 @@ function mountEditor(ed) {
   });
   ed.addEventListener('paste', (e) => {
     e.preventDefault();
-    const t = e.clipboardData.getData('text/plain');
+    const t = e.clipboardData.getData(MD) || e.clipboardData.getData('text/plain');
     if (t) replaceSel(ed, t.replace(/\r\n?/g, '\n')); // no text (e.g. an image): ignore, keep the selection
   });
-  // Copy the exact markdown source rather than the browser's serialisation of the line divs.
+  // Other apps get plain text without code markers; the editor's own paste reads the exact markdown source (MD).
   const copy = (e) => {
     const s = selOf(ed);
     if (!s || s.start === s.end) return;
     e.preventDefault();
-    e.clipboardData.setData('text/plain', editing.draft.slice(s.start, s.end));
+    const md = editing.draft.slice(s.start, s.end);
+    e.clipboardData.setData('text/plain', plainText(md, inFence(editing.draft, s.start)));
+    e.clipboardData.setData(MD, md);
     if (e.type === 'cut') replaceSel(ed, '');
   };
   ed.addEventListener('copy', copy);
@@ -1271,6 +1288,16 @@ document.addEventListener('keydown', (e) => {
     const p = state.projects[Number(e.key) - 1];
     if (p) { e.preventDefault(); selectView(p.id); }
   }
+});
+
+// Copying a selection from the preview: plain text only, so rich paste targets don't turn the
+// HTML's <pre> back into ``` fences. The editor and other fields handle their own copy.
+document.addEventListener('copy', (e) => {
+  const el = document.activeElement;
+  const t = getSelection().toString();
+  if (!t || e.defaultPrevented || /INPUT|TEXTAREA/.test(el?.tagName) || el?.isContentEditable) return; // nothing selected: leave the clipboard alone
+  e.preventDefault();
+  e.clipboardData.setData('text/plain', t);
 });
 
 window.api.onCommand((cmd) => {

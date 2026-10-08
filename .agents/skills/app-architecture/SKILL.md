@@ -100,9 +100,9 @@ Rules that follow from the full rebuild:
 ## Markdown and the editor
 
 `renderMarkdown` supports fenced ```` ``` ```` blocks (with a language label and a copy button; a fence is a line
-starting with ```` ``` ```` after optional spaces, the `FENCE` rule that `decorate`, `inFence`, `renumber` and
+starting with ```` ``` ```` after optional spaces with no backtick after it, the `FENCE` rule that `decorate`, `inFence`, `renumber` and
 `fmtRuns` use too, so a ```` ``` ```` mid-line is never a block, and an unclosed fence runs to the end),
-`` `inline code` ``, `-` / `*` / `1.` / `1)` lists nested by indentation (2 spaces per level), and `**bold**`,
+`` `inline code` `` (`CODE`: any backtick run closed by an equal one, so ```` ```x``` ```` alone on a line is inline code), `-` / `*` / `1.` / `1)` lists nested by indentation (2 spaces per level), and `**bold**`,
 `*italic*` / `_italic_` and `<u>underline</u>` (`inline(text, keep)` → `emphasis`). Keep it small; prompts are pasted
 into agents as plain text. Emphasis runs on **escaped** text (so `<u>` is only the literal tag pair, never other HTML),
 never crosses a line, skips inline code and fences and lines over 2000 chars, and `*` / `_` only count at word
