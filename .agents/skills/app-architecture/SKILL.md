@@ -134,16 +134,18 @@ pass runs before the `*` passes). Native edits (`sync`) and paste / cut (`replac
 renumbers only when the edit changed the line count, so a retyped number sticks. Code is decorated too: inline
 code via `inline(text, true)` is a `<code spellcheck="false">` whose `.fm` backticks sit inside the pill and are
 transparent, and every line of a fenced block (fences included) is a `.ln.cb` div with `spellcheck="false"`, never
-list or emphasis decorated; fence lines also get `.fence` (their ``` ``` ``` is transparent, the closer is drawn as the
-block's bottom bar); `.cb-first` is the opener (drawn as the block's top bar; the preview's `.codeblock` has no header, only the code), `.cb-last` the closer or, while unclosed, the
-last line, so the lines together look like the preview's `.codeblock`. In a block `enterEdit` keeps the line's
+list or emphasis decorated; fence lines also get `.fence` (10px tall: they are the block's top / bottom padding, their ``` ``` ``` transparent,
+the language small and dimmed); `.cb-first` is the opener, `.cb-last` the closer or, while unclosed, the
+last line, so the lines together look exactly like the preview's `.codeblock` (no header, only the code); the preview drops
+blank lines next to a block, so one blank line right before an opener or after a closer is a 10px `.gap` line (the block's margin). Code, inline code and
+list rules are shared between `.body` and `.editor` in `styles.css` so toggling the editor moves nothing (smoke checks it). In a block `enterEdit` keeps the line's
 indentation (not on ⇧↩), and ↩ at the end of an opener nothing closes yet inserts the closing fence (one undo
 step); ↩ after a typed closer directly above another bare closer steps over it (the duplicate goes, caret on the
-line after) unless that bare line opens a following block. List lines hang after their marker: the marker is plain
-inline monospace text (never `inline-block`, which breaks ↑/↓ columns) and the line gets
-a `.w<n>` class (marker length) that sets `padding-left` and a negative `text-indent`. The line also carries
-`ul`/`ol` and `l<n>` (nesting level) so CSS draws the preview's bullet (disc, circle, square) over the
-transparent `-` / `*` with a zero-width `::before`, leaving the text raw markdown.
+line after) unless that bare line opens a following block. List lines hang at the preview's indent (1.5em per
+level, `l<n>`): the marker is plain inline monospace text (never `inline-block`, which breaks ↑/↓ columns), transparent,
+letter-spaced by its length (`.w<n>`) to fill that indent. The line also carries `ul`/`ol` (and `data-n`, the number)
+so a zero-width `::before` draws the preview's `::marker` text (`• ` / `◦ ` / `▪ ` by level, the preview sets the same
+glyphs, or `1. `) right-aligned at the text start, leaving the text raw markdown.
 
 ## Styling
 

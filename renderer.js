@@ -174,9 +174,10 @@ function renderMarkdown(src) {
     let j = i + 1;
     while (j < lines.length && !FENCE.test(lines[j])) j++;
     out += blocks(text.join('\n').replace(/\n+$/, ''));
-    out += `<div class="codeblock"><pre><code>${esc(lines.slice(i + 1, j).join('\n'))}</code></pre></div>`;
+    const code = esc(lines.slice(i + 1, j).join('\n'));
     text = [];
     for (i = j; lines[i + 1] === ''; i++); // blank lines after a block don't render
+    out += `<div class="codeblock${i >= lines.length - 1 ? ' end' : ''}"><pre><code>${code}</code></pre></div>`; // .end: nothing follows
   }
   return out + blocks(text.join('\n'));
 }
@@ -190,11 +191,13 @@ function renderMarkdown(src) {
 function decorate(src) {
   if (!src) return ''; // truly empty, so the :empty placeholder shows
   let fence = false;
+  let closer = -1; // index of the last closing fence
   return src.split('\n').map((line, i, all) => {
     const isFence = FENCE.test(line);
+    if (fence && isFence) closer = i;
     const code = fence || isFence; // fences and the code between them are left unformatted
     if (code) {
-      // A block like the preview's: .cb-first is the opener (its ``` and language dimmed, like the header),
+      // A block like the preview's: .cb-first is the opener (its ``` transparent, the language small and dimmed),
       // .cb-last the closer, or the last line while the fence is still open.
       const cls = `${isFence ? ' fence' : ''}${!fence ? ' cb-first' : ''}${(fence && isFence) || i === all.length - 1 ? ' cb-last' : ''}`;
       if (isFence) fence = !fence;
@@ -203,12 +206,15 @@ function decorate(src) {
         : !line ? '<br>' : esc(line);
       return `<div class="ln cb${cls}" spellcheck="false">${body}</div>`;
     }
+    // The preview drops blank lines next to a block, so one right before an opener or after a closer
+    // is drawn as the block's margin (.gap) instead of a full line.
+    if (!line && (closer === i - 1 || FENCE.test(all[i + 1] || ''))) return '<div class="ln gap"><br></div>';
     const m = LIST.exec(line);
     if (!m) return `<div class="ln">${!line ? '<br>' : inline(line, true)}</div>`;
-    // w<n>: marker width in (monospace) characters, for the hanging indent in CSS. ul/ol + l<n> (nesting
-    // level, 2 spaces per level) let CSS draw the preview's bullet over the dash; the text stays markdown.
+    // w<n>: marker width in (monospace) characters, l<n>: nesting level (2 spaces per level), for the hanging
+    // indent in CSS. ul/ol (+ data-n) let CSS draw the preview's bullet or number over the marker; the text stays markdown.
     const kind = /\d/.test(m[2]) ? 'ol' : 'ul';
-    return `<div class="ln li ${kind} l${Math.min(m[1].length >> 1, 2)} w${Math.min(m[0].length, 20)}"><span class="mk">${esc(m[0])}</span>${inline(line.slice(m[0].length), true)}</div>`;
+    return `<div class="ln li ${kind} l${Math.min(m[1].length >> 1, 5)} w${Math.min(m[0].length, 20)}"${kind === 'ol' ? ` data-n="${parseInt(m[2], 10)}"` : ''}><span class="mk">${esc(m[0])}</span>${inline(line.slice(m[0].length), true)}</div>`;
   }).join('');
 }
 

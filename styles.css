@@ -237,22 +237,25 @@ button.chip:hover { background: var(--fill-3); color: var(--text); }
 .body { user-select: text; cursor: text; }
 .card.stale .body { color: var(--text-stale); }
 .card.done .body { color: var(--text-2); }
-.body code {
+/* Code, inline code and lists look the same in the preview and the editor (the editor shows the markdown
+   source, its markers transparent or dimmed), so opening the editor moves nothing: shared rules first. */
+.body code, .editor code {
   font: 12.5px var(--mono);
   padding: 1.5px 5px; border-radius: 5px;
   background: var(--inline-code-bg); color: var(--inline-code-fg);
 }
-.codeblock {
-  margin: 10px 0; border-radius: 8px; overflow: hidden;
-  background: var(--code-bg); border: 1px solid var(--code-line);
-  white-space: normal;
-}
-.codeblock:last-child { margin-bottom: 2px; }
-.codeblock pre { margin: 0; padding: 10px 12px; overflow-x: auto; tab-size: 4; } /* same as the editor's .cb */
-.body .codeblock code { font: 12.5px/1.6 var(--mono); color: var(--code-fg); white-space: pre; padding: 0; background: none; border-radius: 0; }
+.codeblock, .editor .cb { background: var(--code-bg); border: 1px solid var(--code-line); }
+.codeblock pre, .editor .cb { font: 12.5px/1.6 var(--mono); letter-spacing: 0; tab-size: 4; color: var(--code-fg); white-space: pre-wrap; }
+.codeblock { margin: 10px 0; border-radius: 8px; overflow: hidden; }
+.codeblock.end { margin-bottom: 2px; } /* not :last-child, text after the block is no element */
+.codeblock pre { margin: 0; padding: 10px 12px; }
+.body .codeblock code { font: inherit; color: inherit; padding: 0; background: none; border-radius: 0; }
 
 .body ul, .body ol { margin: 0; padding-left: 1.5em; }
 .body li::marker { color: var(--text-2); }
+.body ul > li::marker { content: '• '; } /* glyphs as text, so the editor can draw the same ones */
+.body :is(ul, ol) ul > li::marker { content: '◦ '; }
+.body :is(ul, ol) :is(ul, ol) ul > li::marker { content: '▪ '; }
 .body strong, .editor strong { font-weight: 600; }
 
 .editor {
@@ -261,53 +264,43 @@ button.chip:hover { background: var(--fill-3); color: var(--text); }
   caret-color: var(--accent);
 }
 .editor:empty::before { content: attr(data-placeholder); position: absolute; color: var(--text-3); pointer-events: none; }
-/* List lines hang after the marker (indent spaces included). The marker stays plain inline text so
-   ↑/↓ keep their column; it is monospace (0.6em per character), so .w<n> (its length) gives its width. */
-.editor .li { padding-left: calc(var(--w) * 0.6em); text-indent: calc(var(--w) * -0.6em); }
-.editor .mk { font-family: var(--mono); white-space: pre; /* the space after the marker must not hang */ color: var(--text-2); }
-/* Bullets look like the preview's ::marker (disc, circle, square by level): the -/* keeps its box so the
-   hanging indent and ↑/↓ columns hold, and the glyph is drawn over it by a zero-width ::before. */
-.editor .ul .mk { color: transparent; }
-/* The marker char is the last two of the marker, so the glyph is shifted over it, past the indent:
-   (var(--w) - 2) characters, plus var(--w) to cancel the .li text-indent the zero-width box inherits. */
-.editor .ul .mk::before {
-  content: '•'; display: inline-block; width: 0;
-  position: relative; left: calc((2 * var(--w) - 2) * 0.6em); color: var(--text-2);
+/* List lines hang at the preview's indent, 1.5em per level (--d). The marker stays plain inline text so
+   ↑/↓ keep their column; it is monospace (1ch per character, .w<n> is its length), letter-spaced to fill
+   the indent, and transparent: the preview's ::marker (bullet or number) is drawn by a zero-width ::before,
+   right-aligned at the text start. */
+.editor .li { --t: calc(1.5em * (var(--d) + 1)); padding-left: var(--t); text-indent: calc(-1 * var(--t)); }
+.editor .mk { font-family: var(--mono); white-space: pre; /* the space after the marker must not hang */
+  color: transparent; letter-spacing: calc(var(--t) / var(--w) - 1ch); }
+.editor .li::before {
+  content: '• '; display: inline-flex; justify-content: flex-end; width: 0; text-indent: 0; white-space: pre;
+  position: relative; left: var(--t); color: var(--text-2);
 }
-.editor .ul.l1 .mk::before { content: '◦'; }
-.editor .ul.l2 .mk::before { content: '▪'; }
+.editor .ul.l1::before { content: '◦ '; }
+.editor .ul:not(.l0, .l1)::before { content: '▪ '; }
+.editor .ol::before { content: attr(data-n) '. '; font-variant-numeric: tabular-nums; } /* as ::marker */
+.editor .l0 { --d: 0; } .editor .l1 { --d: 1; } .editor .l2 { --d: 2; } .editor .l3 { --d: 3; } .editor .l4 { --d: 4; } .editor .l5 { --d: 5; }
 .editor .w2 { --w: 2; } .editor .w3 { --w: 3; } .editor .w4 { --w: 4; } .editor .w5 { --w: 5; } .editor .w6 { --w: 6; }
 .editor .w7 { --w: 7; } .editor .w8 { --w: 8; } .editor .w9 { --w: 9; } .editor .w10 { --w: 10; } .editor .w11 { --w: 11; }
 .editor .w12 { --w: 12; } .editor .w13 { --w: 13; } .editor .w14 { --w: 14; } .editor .w15 { --w: 15; } .editor .w16 { --w: 16; }
 .editor .w17 { --w: 17; } .editor .w18 { --w: 18; } .editor .w19 { --w: 19; } .editor .w20 { --w: 20; }
 /* Emphasis markers stay in the source text, dimmed and in the plain face. */
 .editor .fm { color: var(--text-3); font-weight: 400; font-style: normal; }
-/* Inline code looks like the preview's; its backticks stay in the text, transparent inside the pill
-   (so they read as its padding and the caret still steps through them). */
-.editor code {
-  font: 12.5px var(--mono);
-  padding: 1.5px 0; border-radius: 5px;
-  background: var(--inline-code-bg); color: var(--inline-code-fg);
-}
+/* Inline code: its backticks stay in the text inside the pill, transparent and as wide as the preview's
+   padding (so they read as it and the caret still steps through them). */
+.editor code { padding-inline: 0; }
+.editor code .fm { letter-spacing: calc(5px - 1ch); }
 .editor code .fm, .editor .fence .fm { color: transparent; }
 /* Fenced code: each line of the block is a .cb line div, together drawn as the preview's .codeblock.
-   white-space stays pre-wrap (inherited), which keeps spaces and tabs and wraps long lines. */
-.editor .cb {
-  font: 12.5px/1.6 var(--mono); letter-spacing: 0; tab-size: 4;
-  color: var(--code-fg); background: var(--code-bg);
-  padding: 0 12px; border: 1px solid var(--code-line); border-block-width: 0;
-}
-/* The opener (``` and language) is the block's header. */
-.editor .cb-first {
-  margin-top: 6px; padding-block: 3px; border-top-width: 1px; border-radius: 8px 8px 0 0;
-  font-size: 10.5px; color: var(--text-3);
-}
-.editor .cb-first:not(.cb-last) { border-bottom-width: 1px; }
-/* The closer is the block's bottom edge: same metrics as the header, its ``` invisible. */
-.editor .fence:not(.cb-first) { padding-block: 3px; font-size: 10.5px; }
-.editor .cb-first + .cb { padding-top: 6px; }
-.editor .cb-last { margin-bottom: 6px; padding-bottom: 4px; border-bottom-width: 1px; border-radius: 0 0 8px 8px; }
+   The fence lines are its 10px top and bottom padding (``` transparent, the language dimmed and small). */
+.editor .cb { padding: 0 12px; border-block-width: 0; }
+.editor .fence { font-size: 9px; line-height: 10px; color: var(--text-3); }
+.editor .cb-first { margin-top: 10px; border-top-width: 1px; border-radius: 8px 8px 0 0; }
+.editor .cb-last { margin-bottom: 10px; border-bottom-width: 1px; border-radius: 0 0 8px 8px; }
+.editor .cb-last:not(.fence) { padding-bottom: 10px; }
+.editor .cb-last:last-child { margin-bottom: 2px; }
 .editor .cb-first.cb-last { border-radius: 8px; }
+.editor .gap { font-size: 9px; line-height: 10px; }
+.editor .gap + .cb-first, .editor .cb-last:has(+ .gap) { margin-block: 0; }
 .edit-hint { margin-top: 10px; font-size: 11px; color: var(--text-3); }
 .edit-hint > span { white-space: nowrap; } /* wraps only between groups */
 .edit-hint code { white-space: nowrap; font: 10.5px var(--mono); padding: 1px 4px; border-radius: 4px; background: var(--inline-code-bg); color: var(--text-2); }
