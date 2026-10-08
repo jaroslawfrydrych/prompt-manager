@@ -43,6 +43,9 @@ assert.strictEqual(byId(await until((d) => byId(d, 'a').flag === 'blue'), 'a').f
 - Drive the UI through real events where possible: `.click()`, `dispatchEvent(new KeyboardEvent('keydown',
   { key, metaKey, bubbles: true }))`, and type into the editor with `document.execCommand('insertText', false, 'text')` (or set its `textContent`
   followed by an `input` event); read the result from `editing.draft`.
+  `execCommand` fires no `beforeinput`, so undo cannot put the caret back where such an edit started; when a check
+  asserts the caret after ⌘Z, type with `win.webContents.sendInputEvent({ type: 'char', keyCode: c })` instead.
+  Undo history is per prompt for the whole run (`hists`), so reopening a prompt resumes it: undo counts assume that.
 - Keys the browser handles itself (arrows, caret movement) need real input: `win.webContents.focus()`, then
   `win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Down' })` (and `keyUp`). It bypasses the app menu,
   so menu accelerators (⌘Z, ⌘N) are tested by sending their command: `win.webContents.send('command', 'undo')`.

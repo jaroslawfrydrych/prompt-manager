@@ -119,8 +119,11 @@ line, decorated by `decorate(src)` (escaped text in spans). Its text (`readText(
 the stored format stays a plain markdown string. On `input` the changed lines are re-decorated (`paint`) and the
 selection is restored by plain-text offset (`selOf` / `setSel`); nothing is touched during IME composition.
 Rewriting the DOM breaks native undo, so the editor keeps its own stack in `editing.hist` (capped at 200 steps).
-Edit ▸ Undo / Redo (⌘Z / ⇧⌘Z) are therefore not native roles: they send the `'undo'` / `'redo'` command, which
-runs `undoRedo` in the editor and `document.execCommand` in any other field. Edits made by key handling (Enter, Tab,
+The stack is per prompt and lives for the app session in `hists` (Map id → hist, not saved; `dropPrompts` deletes
+it with the prompt), so reopening a prompt resumes its undo / redo. Edit ▸ Undo / Redo (⌘Z / ⇧⌘Z) are therefore not
+native roles: they send the `'undo'` / `'redo'` command, which runs `undoRedo` in the open editor (only ever its
+prompt), `document.execCommand` in any other focused field (search, rename), and with nothing focused and no editor
+open `undoClosed`: it reopens `lastEdited`, the prompt whose text last changed (set in `record` / `undoRedo`, not by opening or closing), switching view / tab if needed, and undoes there, caret at the change. Edits made by key handling (Enter, Tab,
 paste, cut) go through `applyEdit` as pure `(text, selection) → [text, selection]` functions such as `enterEdit` and
 `tabEdit` (and `backEdit`: Backspace after a marker outdents / removes it); list edits end with `renumber`, which
 keeps numbered siblings consecutive and never touches lines inside a ```` ``` ```` fence. Format ▸ Bold / Italic /

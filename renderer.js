@@ -21,6 +21,10 @@ const ICONS = {
 
 let state = { version: 2, projects: [], prompts: [], view: 'all', tab: 'pending' };
 let editing = null; // { id, draft, orig, isNew, caret, hist, at }
+// Undo history per prompt for this session (not saved): reopening a prompt resumes it, and ⌘Z with
+// no editor open reopens the last edited prompt and undoes there.
+const hists = new Map(); // prompt id → { stack: [{ text, sel }], i, kind, at }
+let lastEdited = null; // prompt id
 let renaming = null; // project id
 let query = '';
 
@@ -303,6 +307,7 @@ function record(text, sel, kind, before) {
   const h = editing.hist;
   const cur = h.stack[h.i];
   if (text === cur.text) return;
+  lastEdited = editing.id; // only a real change makes this the prompt ⌘Z reopens
   h.stack.length = h.i + 1;
   const sameSpot = before && before.start === cur.sel.start && before.end === cur.sel.end;
   if (kind && kind === h.kind && sameSpot && h.i > 0 && Date.now() - h.at < 1000) h.stack[h.i] = { text, sel };
@@ -349,11 +354,25 @@ const lineCount = (s) => s.split('\n').length;
 // around the caret so it has no gaps (code in fences is left alone). Edits within a line are left alone, so a typed number sticks.
 const relist = (old, text, sel) => (lineCount(old) === lineCount(text) ? [text, sel] : renumber(text, sel));
 
+function undoClosed(dir) {
+  const h = hists.get(lastEdited);
+  const p = state.prompts.find((x) => x.id === lastEdited);
+  if (!p || !h?.stack[h.i + dir]) return;
+  if (!visiblePrompts().includes(p)) {
+    state.tab = p.doneAt ? 'done' : 'pending';
+    selectView(p.projectId);
+  }
+  startEdit(p.id);
+  const ed = $('#list .editor');
+  if (ed) undoRedo(ed, dir);
+}
+
 function undoRedo(ed, dir) {
   const h = editing.hist;
   if (!h.stack[h.i + dir]) return;
   h.i += dir;
   h.kind = null;
+  lastEdited = editing.id;
   show(ed, h.stack[h.i].text, h.stack[h.i].sel);
 }
 
@@ -766,7 +785,10 @@ function mountEditor(ed) {
   const hit = r && selOf(ed);
   ed.classList.remove('hit');
   const pos = editing.caret = hit ? hit.start : editing.caret == null ? editing.draft.length : editing.caret;
-  editing.hist = editing.hist || { stack: [{ text: editing.draft, sel: { start: pos, end: pos } }], i: 0 };
+  const h = editing.hist = hists.get(editing.id) || { stack: [{ text: editing.draft, sel: { start: pos, end: pos } }], i: 0 };
+  hists.set(editing.id, h);
+  // Saving trims trailing whitespace and an emptied prompt keeps its old text, so the step may differ.
+  if (h.stack[h.i].text !== editing.draft) h.stack[h.i] = { text: editing.draft, sel: { start: pos, end: pos } };
   setSel(ed, { start: pos, end: pos });
 
   let before = null; // selection before the current native edit
@@ -916,7 +938,7 @@ function cardHtml(p) {
   const doneLabel = p.doneAt ? `done ${ago(p.doneAt)}` : '';
   const body = isEditing
     ? `<div class="editor" contenteditable="plaintext-only" spellcheck="true" role="textbox" aria-multiline="true" data-placeholder="What are we working on?"></div>
-       <div class="edit-hint"><span>saved as you type</span> · <span><kbd>⌘</kbd><kbd>↩</kbd> done</span> · <span><kbd>esc</kbd> close</span> · <span><code>\`code\`</code> <code>\`\`\`block\`\`\`</code></span> <span><code>- list</code> <code>1. list</code> <kbd>⇥</kbd> nest</span> · <span><kbd>⌘B</kbd> <kbd>⌘I</kbd> <kbd>⌘U</kbd> format</span></div>`
+       <div class="edit-hint"><span>saved as you type</span> · <span><kbd>⌘</kbd><kbd>↩</kbd> done</span> · <span><kbd>esc</kbd> close</span> · <span><code>\`code\`</code> <code>\`\`\`block\`\`\`</code></span> <span><code>- list</code> <code>1. list</code> <kbd>⇥</kbd> nest</span> · <span><kbd>⌘B</kbd> <kbd>⌘I</kbd> <kbd>⌘U</kbd> format</span> · <span><kbd>⌘Z</kbd> undo</span></div>`
     : `<div class="body">${renderMarkdown(p.text)}</div>`;
 
   const draggable = !isEditing && !p.doneAt ? ' draggable="true"' : '';
@@ -1029,12 +1051,13 @@ function startEdit(id, at) {
 function commitEdit(rerender = true) {
   if (!editing) return;
   saveDraft(); // catches a draft typed mid-IME composition
-  const { id, isNew } = editing;
+  const { id, isNew, hist } = editing;
   editing = null;
+  if (hist) hist.kind = null; // typing in the next session is a new undo step
   const p = state.prompts.find((x) => x.id === id);
   if (p) {
     // An empty new prompt is discarded.
-    if (isNew && !p.text.trim()) state.prompts = state.prompts.filter((x) => x.id !== id);
+    if (isNew && !p.text.trim()) dropPrompts((x) => x.id === id);
   }
   persist();
   if (rerender) render();
@@ -1080,10 +1103,16 @@ function toggleDone(p) {
   setTimeout(apply, 260);
 }
 
+// Removes prompts along with their undo history.
+function dropPrompts(gone) {
+  for (const p of state.prompts.filter(gone)) hists.delete(p.id);
+  state.prompts = state.prompts.filter((p) => !gone(p));
+}
+
 async function deletePrompt(p) {
   const ok = await window.api.confirm('Delete this prompt?', 'This cannot be undone.', 'Delete');
   if (!ok) return;
-  state.prompts = state.prompts.filter((x) => x.id !== p.id);
+  dropPrompts((x) => x.id === p.id);
   persist();
   render();
 }
@@ -1098,7 +1127,7 @@ async function projectMenu(p) {
       'Delete');
     if (!ok) return;
     state.projects = state.projects.filter((x) => x.id !== p.id);
-    state.prompts = state.prompts.filter((x) => x.projectId !== p.id);
+    dropPrompts((x) => x.projectId === p.id);
     persist();
     render();
   }
@@ -1320,10 +1349,14 @@ window.api.onCommand((cmd) => {
   // An update check found a newer version; the install starts only when the button is clicked.
   if (cmd === 'update-available') $('#update').hidden = false;
   // Edit ▸ Undo / Redo (⌘Z / ⇧⌘Z): the editor has its own history, other fields use the browser's.
+  // With no field focused, it reopens the last edited prompt and undoes there (never another prompt while editing).
   if (cmd === 'undo' || cmd === 'redo') {
-    const ed = document.activeElement;
-    if (editing && ed?.classList.contains('editor')) undoRedo(ed, cmd === 'undo' ? -1 : 1);
-    else document.execCommand(cmd);
+    const f = document.activeElement;
+    const ed = $('#list .editor');
+    const dir = cmd === 'undo' ? -1 : 1;
+    if (f !== ed && f?.matches('input, textarea, [contenteditable]')) document.execCommand(cmd);
+    else if (editing) { if (ed) undoRedo(ed, dir); }
+    else undoClosed(dir);
   }
   // Format ▸ Bold / Italic / Underline (⌘B / ⌘I / ⌘U): only the prompt editor has markdown to format.
   if (WRAP[cmd]) {

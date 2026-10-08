@@ -593,7 +593,7 @@ app.on('browser-window-created', (_e, win) => {
         await wait(gap);
         win.webContents.sendInputEvent({ type: 'mouseUp', x: pt[0], y: pt[1], button: 'left', clickCount: 1 });
         await wait(300);
-        assert.deepStrictEqual(await js(`[editing && editing.id, editing.caret, selOf(${ed}).start, editing.hist.stack[0].sel.start]`), [id, ...Array(3).fill(words.indexOf('four') + 1)]);
+        assert.deepStrictEqual(await js(`[editing && editing.id, editing.caret, selOf(${ed}).start, editing.hist.stack[editing.hist.i].sel.start]`), [id, ...Array(3).fill(words.indexOf('four') + 1)]);
         await js(`commitEdit(true)`);
       };
       await js(`for (const p of state.prompts) if (p.id === 'a' || p.id === ${JSON.stringify(low)}) p.text = ${JSON.stringify(words)}; render()`);
@@ -615,6 +615,45 @@ app.on('browser-window-created', (_e, win) => {
       win.webContents.sendInputEvent({ type: 'mouseUp', x: search[0], y: search[1], button: 'left', clickCount: 1 });
       await wait(300);
       assert.deepStrictEqual(await js(`[editing, document.activeElement.id]`), [null, 'search']);
+
+      // ⌘Z after closing the editor (nothing focused) reopens the last edited prompt and undoes there
+      const textOf = async (id) => byId(read(), id).text;
+      await js(`document.activeElement.blur(); state.prompts.forEach((p) => { if (p.id === 'a' || p.id === 'b') p.doneAt = null; }); selectView(state.prompts.find((p) => p.id === 'b').projectId)`);
+      const [ta, tb] = [await textOf('a'), await textOf('b')];
+      await js(`startEdit('a'); setSel(${ed}, { start: 0, end: 0 })`);
+      win.webContents.focus(); // real keys: execCommand fires no beforeinput, which undo uses to put the caret back
+      for (const c of 'A1 ') win.webContents.sendInputEvent({ type: 'char', keyCode: c });
+      await key('Escape');
+      await until((d) => byId(d, 'a').text === `A1 ${ta}`);
+      await cmd('undo');
+      assert.deepStrictEqual(await js(`[editing?.id, state.view, selOf(${ed}).start]`), ['a', byId(read(), 'a').projectId, 0]);
+      await until((d) => byId(d, 'a').text === ta);
+      await cmd('redo');
+      await until((d) => byId(d, 'a').text === `A1 ${ta}`);
+      // opening B to read and closing it without typing keeps A as the prompt ⌘Z goes back to
+      await key('Escape');
+      await js(`startEdit('b')`);
+      await key('Escape');
+      await cmd('undo');
+      await until((d) => byId(d, 'a').text === ta);
+      assert.strictEqual(await textOf('b'), tb);
+      await cmd('redo');
+      await until((d) => byId(d, 'a').text === `A1 ${ta}`);
+      // while editing B, ⌘Z never touches A
+      await key('Escape');
+      await js(`startEdit('b'); setSel(${ed}, { start: 0, end: 0 })`);
+      await type('B1 ');
+      await until((d) => byId(d, 'b').text === `B1 ${tb}`);
+      await cmd('undo');
+      await until((d) => byId(d, 'b').text === tb);
+      assert.strictEqual(await textOf('a'), `A1 ${ta}`);
+      // reopening A resumes its history: ⌘Z undoes the previous session's edit
+      await key('Escape');
+      await js(`startEdit('a')`);
+      await cmd('undo');
+      await until((d) => byId(d, 'a').text === ta);
+      assert.strictEqual(await textOf('b'), tb);
+      await key('Escape');
 
       console.log('SMOKE OK');
       app.exit(0);
