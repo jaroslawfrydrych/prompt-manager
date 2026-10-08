@@ -194,8 +194,10 @@ function decorate(src) {
     }
     const m = LIST.exec(line);
     if (!m) return `<div class="ln">${!line ? '<br>' : inline(line, true)}</div>`;
-    // w<n>: marker width in (monospace) characters, for the hanging indent in CSS.
-    return `<div class="ln li w${Math.min(m[0].length, 20)}"><span class="mk">${esc(m[0])}</span>${inline(line.slice(m[0].length), true)}</div>`;
+    // w<n>: marker width in (monospace) characters, for the hanging indent in CSS. ul/ol + l<n> (nesting
+    // level, 2 spaces per level) let CSS draw the preview's bullet over the dash; the text stays markdown.
+    const kind = /\d/.test(m[2]) ? 'ol' : 'ul';
+    return `<div class="ln li ${kind} l${Math.min(m[1].length >> 1, 2)} w${Math.min(m[0].length, 20)}"><span class="mk">${esc(m[0])}</span>${inline(line.slice(m[0].length), true)}</div>`;
   }).join('');
 }
 

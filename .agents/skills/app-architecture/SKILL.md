@@ -134,7 +134,9 @@ indentation (not on ⇧↩), and ↩ at the end of an opener nothing closes yet 
 step); ↩ after a typed closer directly above another bare closer steps over it (the duplicate goes, caret on the
 line after) unless that bare line opens a following block. List lines hang after their marker: the marker is plain
 inline monospace text (never `inline-block`, which breaks ↑/↓ columns) and the line gets
-a `.w<n>` class (marker length) that sets `padding-left` and a negative `text-indent`.
+a `.w<n>` class (marker length) that sets `padding-left` and a negative `text-indent`. The line also carries
+`ul`/`ol` and `l<n>` (nesting level) so CSS draws the preview's bullet (disc, circle, square) over the
+transparent `-` / `*` with a zero-width `::before`, leaving the text raw markdown.
 
 ## Styling
 

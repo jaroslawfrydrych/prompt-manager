@@ -192,6 +192,26 @@ app.on('browser-window-created', (_e, win) => {
       assert.strictEqual(await js(`${body}.querySelectorAll(':scope > ul > li').length`), 2);
       assert.strictEqual(await js(`${body}.querySelector(':scope > ol').getAttribute('start')`), '3');
       assert.strictEqual(await js(`${body}.querySelector('ol > li > ol > li').textContent`), 'd');
+      // lists look like the preview while editing: the bullet glyph (disc, circle, square by level) is drawn
+      // over the -/* marker, numbers stay as typed, and the text is still the raw markdown
+      await js(`newPrompt(); document.execCommand('insertText', false, '- a\\n  * b\\n    - c\\n1. d')`);
+      assert.deepStrictEqual(await js(`[...${ed}.querySelectorAll('.ln.li')].map((l) => l.className)`), [
+        'ln li ul l0 w2', 'ln li ul l1 w4', 'ln li ul l2 w6', 'ln li ol l0 w3',
+      ]);
+      assert.deepStrictEqual(
+        await js(`[...${ed}.querySelectorAll('.ln.li .mk')].map((m) => getComputedStyle(m, '::before').content)`),
+        ['"•"', '"◦"', '"▪"', 'none'],
+      );
+      // each level's bullet paints over its own -/*, one indent step further right, like the preview's nested
+      // <ul>: the declared left plus the text-indent the zero-width box inherits must be (w - 2) characters
+      const bullets = await js(`[...${ed}.querySelectorAll('.ul .mk')].map((m) => {
+        const s = getComputedStyle(m.parentElement);
+        return [parseFloat(getComputedStyle(m, '::before').left) + parseFloat(s.textIndent),
+          (parseFloat(s.getPropertyValue('--w')) - 2) * 0.6 * parseFloat(s.fontSize)];
+      })`);
+      assert.ok(bullets.every(([got, want]) => Math.abs(got - want) < 0.5), `bullet offsets: ${bullets}`);
+      assert.ok(await js(`readText(${ed}) === editing.draft && editing.draft === '- a\\n  * b\\n    - c\\n1. d'`));
+      await js(`${ed}.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
       // numbered items keep consecutive numbers through Enter, Tab and Shift+Tab (caret follows a wider number)
       const edit = async (f, t, s, ...a) => js(`${f}(${JSON.stringify(t)}, { start: ${s}, end: ${s} }${a.map((x) => `, ${x}`).join('')})`);
       assert.deepStrictEqual(await edit('enterEdit', '1. a\n2. b', 4), ['1. a\n2. \n3. b', { start: 8, end: 8 }]);
