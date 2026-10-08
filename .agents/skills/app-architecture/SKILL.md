@@ -126,9 +126,10 @@ the other parts are wrapped (a caret inside a word toggles the word; a caret aga
 instead of nesting an empty pair; an italic wrap whose `*` would merge into a neighbouring `*` uses `_`, so the `_`
 pass runs before the `*` passes). Native edits (`sync`) and paste / cut (`replaceSel`) go through `relist`, which
 renumbers only when the edit changed the line count, so a retyped number sticks. Code is decorated too: inline
-code via `inline(text, true)` is a `<code spellcheck="false">` between dimmed `.fm` backticks, and every line of a
-fenced block (fences included) is a `.ln.cb` div with `spellcheck="false"`, never list or emphasis decorated;
-`.cb-first` is the opener (dimmed, drawn like the preview's header), `.cb-last` the closer or, while unclosed, the
+code via `inline(text, true)` is a `<code spellcheck="false">` whose `.fm` backticks sit inside the pill and are
+transparent, and every line of a fenced block (fences included) is a `.ln.cb` div with `spellcheck="false"`, never
+list or emphasis decorated; fence lines also get `.fence` (their ``` ``` ``` is transparent, the closer is drawn as the
+block's bottom bar); `.cb-first` is the opener (drawn like the preview's header), `.cb-last` the closer or, while unclosed, the
 last line, so the lines together look like the preview's `.codeblock`. In a block `enterEdit` keeps the line's
 indentation (not on ⇧↩), and ↩ at the end of an opener nothing closes yet inserts the closing fence (one undo
 step); ↩ after a typed closer directly above another bare closer steps over it (the duplicate goes, caret on the

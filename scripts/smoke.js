@@ -413,9 +413,9 @@ app.on('browser-window-created', (_e, win) => {
         'Files: README*, LICENSE*, CHANGELOG*', 'Branches feature*, fix* and release*', 'Match log*, tmp* and cache*',
         'Delete test*; keep main*', 'Prefixes (api*, web*) only', 'Tables user*, order*', 'The H*-algorithm and A*-search']) assert.strictEqual(await md(t), t);
 
-      // code live in the editor: inline code in the code face with dimmed backticks, not spell checked
+      // code live in the editor: inline code in the code face with invisible backticks, not spell checked
       await js(`newPrompt(); document.execCommand('insertText', false, 'say \`x *y*\` now')`);
-      assert.strictEqual(await js(`${ed}.querySelector('code').textContent`), 'x *y*');
+      assert.strictEqual(await js(`${ed}.querySelector('code').textContent`), '`x *y*`');
       assert.ok(/mono|menlo/i.test(await style('code', 'fontFamily')));
       assert.strictEqual(await js(`[...${ed}.querySelectorAll('.fm')].map((e) => e.textContent).join('')`), '``');
       assert.strictEqual(await js(`${ed}.querySelector('code').spellcheck`), false);
@@ -424,17 +424,16 @@ app.on('browser-window-created', (_e, win) => {
       const block = 'a\n```js\n- not list\n\t**no**  x\n```\nb';
       await js(`document.execCommand('selectAll'); document.execCommand('insertText', false, ${JSON.stringify(block)})`);
       assert.deepStrictEqual(await js(`[...${ed}.children].map((l) => l.className)`),
-        ['ln', 'ln cb cb-first', 'ln cb', 'ln cb', 'ln cb cb-last', 'ln']);
+        ['ln', 'ln cb fence cb-first', 'ln cb', 'ln cb', 'ln cb fence cb-last', 'ln']);
       assert.strictEqual(await js(`${ed}.querySelectorAll('.cb strong, .cb .mk, .cb.li').length`), 0);
       assert.strictEqual(await js(`${ed}.querySelectorAll('.cb')[2].textContent`), '\t**no**  x');
       assert.strictEqual(await js(`${ed}.querySelector('.cb').spellcheck`), false);
-      assert.strictEqual(await style('.cb-first', 'color'), await style('.fm', 'color'));
-      assert.notStrictEqual(await style('.cb + .cb', 'color'), await style('.fm', 'color'));
+      assert.notStrictEqual(await style('.cb + .cb', 'color'), await style('.cb-first', 'color'));
       assert.ok(/mono|menlo/i.test(await style('.cb', 'fontFamily')));
       assert.ok(await js(`readText(${ed}) === editing.draft`));
       // an unclosed fence is code to the end
       await js(`document.execCommand('selectAll'); document.execCommand('insertText', false, 'x\\n\`\`\`\\ny')`);
-      assert.deepStrictEqual(await js(`[...${ed}.children].map((l) => l.className)`), ['ln', 'ln cb cb-first', 'ln cb cb-last']);
+      assert.deepStrictEqual(await js(`[...${ed}.children].map((l) => l.className)`), ['ln', 'ln cb fence cb-first', 'ln cb cb-last']);
       // ``` + ↩ closes the fence (one undo step); ↩ in a block keeps the line's indentation
       await js(`document.execCommand('selectAll'); document.execCommand('insertText', false, 'run:\\n\`\`\`sh')`);
       await key('Enter');
@@ -468,7 +467,7 @@ app.on('browser-window-created', (_e, win) => {
       assert.strictEqual(await draft(), '```js\nx\n```\n');
       assert.strictEqual(await js(`selOf(${ed}).start`), 12);
       await type('after');
-      assert.deepStrictEqual(await js(`[...${ed}.children].map((l) => l.className)`), ['ln cb cb-first', 'ln cb', 'ln cb cb-last', 'ln']);
+      assert.deepStrictEqual(await js(`[...${ed}.children].map((l) => l.className)`), ['ln cb fence cb-first', 'ln cb', 'ln cb fence cb-last', 'ln']);
       await cmd('undo');
       await cmd('undo');
       assert.strictEqual(await draft(), '```js\nx\n```\n```');
@@ -485,6 +484,21 @@ app.on('browser-window-created', (_e, win) => {
       assert.strictEqual(await js(`const d = document.createElement('div'); d.innerHTML = decorate(${JSON.stringify(mid)}); d.querySelectorAll('.cb').length + ',' + d.querySelectorAll('.li').length`), '0,2');
       assert.strictEqual(await js(`const d = document.createElement('div'); d.innerHTML = renderMarkdown('x\\n  \`\`\`py\\n  a = 1\\n\`\`\`\\n\\ny');
         [d.firstChild.textContent, d.querySelector('.cb-head').textContent, d.querySelector('pre').textContent, d.lastChild.textContent].join('|')`), 'x|py|  a = 1|y');
+
+      // code markers are invisible in the editor but stay in the text
+      const src = 'Fix `x`\n```js\nlet a = 1;\n```';
+      assert.strictEqual(await js(`const d = document.createElement('div'); d.className = 'editor'; d.innerHTML = decorate(${JSON.stringify(src)});
+        document.body.append(d); const c = (s) => getComputedStyle(d.querySelector(s)).color;
+        const r = [readText(d), c('code .fm'), c('.fence.cb-first .fm'), c('.fence:not(.cb-first) .fm'), d.querySelector('code').textContent].join('|');
+        d.remove(); r`), `${src}|rgba(0, 0, 0, 0)|rgba(0, 0, 0, 0)|rgba(0, 0, 0, 0)|\`x\``);
+
+      // Copy strips the fences (language tag included) and the inline backticks, code content kept
+      assert.strictEqual(await js(`plainText(${JSON.stringify(src)})`), 'Fix x\nlet a = 1;');
+      assert.strictEqual(await js(`plainText('a \`b\` c\\n\`\`\`\\nkeep \`this\`\\n\`\`\`')`), 'a b c\nkeep `this`');
+      await js(`commitEdit(false); const p = state.prompts.find((q) => q.id === 'a'); p.doneAt = null; p.text = ${JSON.stringify(src)}; selectView(p.projectId); state.tab = 'pending'; render()`);
+      await js(`${card('a')}.querySelector('[data-act=copy]').click()`);
+      await wait(200);
+      assert.strictEqual(await clipboard.readText(), 'Fix x\nlet a = 1;');
 
       // app menu: Format sits after Edit, and no two items share an accelerator
       const items = (m) => m.items.flatMap((i) => [i, ...(i.submenu ? items(i.submenu) : [])]);

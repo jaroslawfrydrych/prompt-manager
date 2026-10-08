@@ -102,13 +102,13 @@ function emphasis(html, keep) {
   });
 }
 
-// Inline code is never formatted; in the editor (keep) its backticks stay as dimmed .fm text around it,
-// and it is not spell checked (identifiers would all be underlined).
+// Inline code is never formatted; in the editor (keep) its backticks stay in the text inside the pill,
+// invisible (CSS) so they read as its padding, and it is not spell checked (identifiers would all be underlined).
 function inline(text, keep) {
   return text.split(/(`[^`\n]+`)/).map((s, i) => {
     if (i % 2 === 0) return emphasis(esc(s), keep);
     const code = esc(s.slice(1, -1));
-    return keep ? `<span class="fm">\`</span><code spellcheck="false">${code}</code><span class="fm">\`</span>` : `<code>${code}</code>`;
+    return keep ? `<code spellcheck="false"><span class="fm">\`</span>${code}<span class="fm">\`</span></code>` : `<code>${code}</code>`;
   }).join('');
 }
 
@@ -171,6 +171,18 @@ function renderMarkdown(src) {
   return out + blocks(text.join('\n'));
 }
 
+// The markdown code markers are not part of the code, so Copy drops fence lines (language tag
+// included) and inline-code backticks. Lines inside a block are code and stay as they are.
+function plainText(src) {
+  let fence = false;
+  const out = [];
+  for (const line of src.split('\n')) {
+    if (FENCE.test(line)) { fence = !fence; continue; }
+    out.push(fence ? line : line.replace(/`([^`\n]+)`/g, '$1'));
+  }
+  return out.join('\n');
+}
+
 // ---------- live editor ----------
 // A contenteditable showing the markdown source, one <div class="ln"> per line, decorated with spans.
 // Its text (readText) always equals editing.draft; every input re-decorates the changed lines and
@@ -186,8 +198,9 @@ function decorate(src) {
     if (code) {
       // A block like the preview's: .cb-first is the opener (its ``` and language dimmed, like the header),
       // .cb-last the closer, or the last line while the fence is still open.
-      const cls = `${!fence ? ' cb-first' : ''}${(fence && isFence) || i === all.length - 1 ? ' cb-last' : ''}`;
+      const cls = `${isFence ? ' fence' : ''}${!fence ? ' cb-first' : ''}${(fence && isFence) || i === all.length - 1 ? ' cb-last' : ''}`;
       if (isFence) fence = !fence;
+      // The ``` of a fence line is invisible (CSS): the line is drawn as the block's top / bottom edge.
       const body = isFence ? line.replace(/^( *)(```)(.*)/, (x, ind, tick, rest) => `${ind}<span class="fm">${tick}</span>${esc(rest)}`)
         : !line ? '<br>' : esc(line);
       return `<div class="ln cb${cls}" spellcheck="false">${body}</div>`;
@@ -1023,7 +1036,7 @@ function editorKeys(e) {
 }
 
 async function copyPrompt(p, btn, alsoDone) {
-  await window.api.copy(p.text);
+  await window.api.copy(plainText(p.text));
   btn.classList.add('copied');
   btn.querySelector('span').textContent = 'Copied';
   if (alsoDone) return setTimeout(() => toggleDone(p), 450);
