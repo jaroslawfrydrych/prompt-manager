@@ -54,10 +54,7 @@ Download the latest `Prompt-Manager-<version>-arm64.dmg` from
 [Releases](https://github.com/jaroslawfrydrych/prompt-manager/releases) and drag the app to **Applications**.
 The build is for Apple Silicon.
 
-The app is not notarized by Apple, so macOS will block the first launch. To open it anyway:
-
-- go to **System Settings → Privacy & Security** and click **Open Anyway**, or
-- run `xattr -dr com.apple.quarantine "/Applications/Prompt Manager.app"`.
+The app is signed with a Developer ID and notarized by Apple, so it opens without a Gatekeeper warning.
 
 ## Keyboard shortcuts
 
