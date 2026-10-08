@@ -13,6 +13,17 @@ DOM or CSS feature before writing code, and never add a package for something a 
 - `main.js` — main process. Owns `data.json` (`load`, atomic `save` via `.tmp` + `rename`, unreadable files are
   copied to `data.json.corrupt-<ts>` instead of being overwritten), the app menu, native context menus, dialogs,
   the About window and single-instance lock.
+- `updater.js` — main-process only, no renderer IPC. App menu ▸ Check for Updates… and a silent check 10 s after launch
+  (packaged builds only, at most once per 24 h, stamp in `userData/update-check.json`, not `data.json`). `net.fetch`es
+  GitHub's `releases/latest`, compares `tag_name` with `compare()` (numeric x.y.z, prerelease never newer), picks the
+  `-<arch>.dmg` asset (`pickAsset`). Install: download to temp (size checked), `hdiutil attach`, `codesign --verify`,
+  bundle id + version from `Info.plist`, `ditto` next to the current bundle as `.<name>.app.update`, then a detached
+  `/bin/sh` (`SWAP`, paths as positional args) waits for the pid to exit and swaps the bundles; `app.quit()` lets the
+  renderer's `beforeunload` save first. Refuses (offers the release page) when unpackaged, translocated, on `/Volumes`
+  or the folder or the bundle itself is not writable. The download URL must parse (`assetUrl`) to `https://github.com`
+  + this repo's `/releases/download/` path; the DMG is saved under a fixed name (`dmgPath`). If the swap rolls back,
+  `SWAP` writes `userData/update-failed`; the next launch deletes it and offers the release page, and also removes
+  a stale `.<name>.app.update`. Progress shows as the dock progress bar and a percentage dock badge.
 - `preload.js` — the only bridge. Exposes `window.api`:
   - `load()` → saved state or `null`
   - `save(state)` → **synchronous** (`sendSync`) so a save from `beforeunload` completes
@@ -30,7 +41,9 @@ Never enable `nodeIntegration` or pass Node objects to the renderer.
 - Every `BrowserWindow`: `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, and `lockDown(win)`
   (blocks navigation, opens only `https://github.com/` links externally).
 - Every HTML file has a CSP meta tag with `default-src 'self'`; no inline scripts or styles, no remote assets.
-- The app makes no network requests.
+- The app makes no network requests except `updater.js`: `api.github.com` for the latest release and GitHub release
+  downloads (`github.com`, which redirects to `objects.githubusercontent.com` / `release-assets.githubusercontent.com`),
+  for updates only. Prompts never leave the Mac; do not add other network use.
 
 ## State (`data.json`)
 

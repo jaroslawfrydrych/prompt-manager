@@ -23,6 +23,7 @@ npm start
 | File | Role |
 |---|---|
 | `main.js` | Main process: window, app menu, native context menus, dialogs, loading and saving `data.json` |
+| `updater.js` | Check for Updates: asks GitHub for the latest release, downloads and verifies the DMG, swaps the app bundle after quit |
 | `preload.js` | The only bridge between the two: exposes `window.api` (`load`, `save`, `copy`, `confirm`, `menu`, `onCommand`) |
 | `renderer.js` | The whole UI: state, rendering, actions, drag & drop, keyboard shortcuts |
 | `index.html`, `styles.css` | Main window markup and styles (light and dark via CSS variables) |
@@ -37,7 +38,9 @@ npm start
 - **Keep the security model.** `contextIsolation`, `sandbox` and no `nodeIntegration` in every window, a strict CSP
   in every HTML file, no navigation away from the app, external links limited to GitHub. The renderer reaches the
   system only through `window.api` in `preload.js`.
-- **Local only.** The app makes no network requests.
+- **Local only.** Prompts never leave the Mac. The only network use is the update check in `updater.js`: requests go
+  only to `api.github.com` (latest release) and GitHub release downloads (`github.com`, redirected to
+  `objects.githubusercontent.com` / `release-assets.githubusercontent.com`), and nothing else may add network requests.
 - **Native feel.** Follow macOS conventions (Mail, Reminders, Finder). Use native menus and dialogs
   through `window.api.menu` and `window.api.confirm` instead of HTML imitations.
 - **Data safety.** Saves are atomic. A change to the shape of `data.json` bumps `state.version` and adds

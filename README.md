@@ -42,7 +42,10 @@ Prompt Manager is where those prompts wait their turn.
 - **Drag & drop.** Reorder projects and prompts. To move a prompt to another project, drop it on that project
   or, in **All** and **Flagged**, click the project name on the card.
 - **Light & dark.** Follows the system appearance.
-- **Local only.** Everything is stored in one JSON file on your Mac. The app makes no network requests.
+- **Local only.** Everything is stored in one JSON file on your Mac. The only network requests are update checks
+  to GitHub (once a day after launch, or **Prompt Manager ▸ Check for Updates…**).
+- **Updates in place.** When a new release is out, **Install and Relaunch** downloads it, verifies it and replaces the app.
+  This needs the app in a folder you can write to (like **Applications**), not running from the disk image.
 
 ## Install
 

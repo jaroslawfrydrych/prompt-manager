@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, clipboard, nativeTheme, nativeImage, Menu, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const updater = require('./updater');
 
 const REPO_URL = 'https://github.com/jaroslawfrydrych/prompt-manager';
 
@@ -161,6 +162,7 @@ app.whenReady().then(() => {
       label: app.name,
       submenu: [
         { label: `About ${app.name}`, click: showAbout },
+        { label: 'Check for Updates…', click: () => updater.check(win) },
         { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },
@@ -224,6 +226,7 @@ app.whenReady().then(() => {
     },
   ]));
   createWindow();
+  updater.auto(win);
 });
 
 app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });

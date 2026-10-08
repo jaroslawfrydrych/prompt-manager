@@ -472,6 +472,28 @@ app.on('browser-window-created', (_e, win) => {
       assert.strictEqual(new Set(accs).size, accs.length, `duplicate accelerator: ${accs}`);
       assert.deepStrictEqual(Menu.getApplicationMenu().items.map((i) => i.label).slice(1, 4), ['File', 'Edit', 'Format']);
 
+      // updates: version compare, asset pick, menu item (no network: the automatic check is off in dev runs)
+      const { compare, pickAsset, assetUrl, dmgPath, auto } = require('../updater.js');
+      assert.strictEqual(auto(win), false, 'the automatic update check must not run unpackaged');
+      const dl = 'https://github.com/jaroslawfrydrych/prompt-manager/releases/download/v1.1.0/Prompt-Manager-1.1.0-arm64.dmg';
+      assert.strictEqual(assetUrl({ browser_download_url: dl }), dl);
+      for (const bad of [
+        'https://github.com/jaroslawfrydrych/prompt-manager/releases/download/../../../evil/x/releases/download/a.dmg',
+        'https://github.com/jaroslawfrydrych/prompt-manager/releases/download/%2e%2e/%2E%2e/%2e%2e/evil/a.dmg',
+        'https://evil.example/jaroslawfrydrych/prompt-manager/releases/download/v1/a.dmg',
+        'http://github.com/jaroslawfrydrych/prompt-manager/releases/download/v1/a.dmg',
+        'https://github.com/someone/prompt-manager/releases/download/v1/a.dmg',
+      ]) assert.throws(() => assetUrl({ browser_download_url: bad }), /Unexpected download location/, bad);
+      assert.strictEqual(dmgPath('/t'), '/t/update.dmg');
+      assert.ok(compare('1.1.0', '1.0.0') > 0 && compare('1.0.0', '1.1.0') < 0);
+      assert.ok(compare('1.10.0', '1.9.9') > 0 && compare('v2.0.0', '1.99.99') > 0);
+      assert.strictEqual(compare('v1.2.3', '1.2.3'), 0);
+      assert.strictEqual(compare('1.3.0-beta.1', '1.2.0'), 0);
+      const assets = [{ name: 'Prompt-Manager-1.1.0-x64.dmg' }, { name: 'Prompt-Manager-1.1.0-arm64.dmg' }, { name: 'notes.txt' }];
+      assert.strictEqual(pickAsset(assets, 'arm64').name, 'Prompt-Manager-1.1.0-arm64.dmg');
+      assert.strictEqual(pickAsset([{ name: 'notes.txt' }], 'arm64'), undefined);
+      assert.deepStrictEqual(Menu.getApplicationMenu().items[0].submenu.items.slice(0, 2).map((i) => i.label), ['About Prompt Manager', 'Check for Updates…']);
+
       console.log('SMOKE OK');
       app.exit(0);
     } catch (err) {

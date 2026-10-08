@@ -11,6 +11,10 @@ description: How to cut a Prompt Manager release (version bump, matching git tag
 - A release is triggered by pushing a tag `v<version>`. The CI job in `.github/workflows/build.yml`
   fails if the tag does not equal `v` + `package.json` version.
 - Pushing a tag is outward-facing and creates a public GitHub Release: confirm with the user before pushing.
+- The in-app updater (`updater.js`) depends on this contract: the release is GitHub's `releases/latest` (not a draft or
+  prerelease), its tag is `v<x.y.z>` (numbers only), and it has an asset ending in `-arm64.dmg` whose root holds
+  `Prompt Manager.app` with bundle id `com.jaroslawfrydrych.promptmanager` and that version. Renaming the DMG or app
+  breaks updates for everyone already installed.
 - Pick the bump with semver: `patch` for fixes, `minor` for new features, `major` for breaking changes
   (e.g. a data format older versions cannot read).
 
